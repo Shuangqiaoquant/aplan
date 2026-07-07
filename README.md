@@ -60,6 +60,7 @@ PYTHONPATH=src python3 -m aplan.strategy_cli list
 ```
 
 更完整的本地运行说明见 [docs/local_run.md](docs/local_run.md)。
+本地、GitHub 和腾讯云服务器的分工与云端运行流程见 [docs/cloud_run.md](docs/cloud_run.md)。
 
 如果本机网络和构建依赖可用，也可以安装成 editable 包：
 
@@ -205,12 +206,22 @@ YINHE_API_MODE=internet
 
 ```bash
 python3 -m pip install /path/to/tgw-*.whl
+python3 -m pip install /path/to/AmazingData-*.whl
 aplan-yinhe securities --as-of 2026-07-06
+aplan-yinhe snapshot-ad --date 20260706 --symbols 600000,000001
+aplan-yinhe snapshot --date 20260706 --symbols 600000,000001
 aplan-yinhe daily --date 20260706 --symbols 600000,000001
 ```
 
 银河数据更适合做受控补源和交叉验证，落地时仍建议先核对字段单位，再接入 `data/raw/yinhe/` 和
-`data/processed/` 的标准化流程。
+`data/processed/` 的标准化流程。试用账号可能只开通 Level-1 股票快照权限；如果 `daily` 返回
+`数据无权限`，先用 `snapshot` 验证连接和字段。如果快照返回 `参数非法`，可先试实时快照参数：
+
+```bash
+aplan-yinhe snapshot-ad --date 20260706 --symbols 600000
+aplan-yinhe snapshot --date 0 --symbols 600000 --snapshot-data-type snapshot
+aplan-yinhe snapshot --date 0 --symbols 600000 --begin-time 93000000 --end-time 150000000
+```
 
 ### 第一轮基线回测
 
