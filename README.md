@@ -10,6 +10,7 @@
 对外发布路线见 [公开路线图](docs/public_roadmap.md)。GitHub Pages 首页位于
 [docs/index.html](docs/index.html)。
 第一篇公开研究日志：[为什么 APlan 不做成荐股器](docs/research_log_001.md)。
+内容运营与反馈工作台见 [content/README.md](content/README.md)。
 
 > 本项目只用于研究，不构成投资建议，也不保证收益。实盘前必须完成样本外验证和模拟盘。
 > 更完整的风险边界见 [DISCLAIMER.md](DISCLAIMER.md)。
