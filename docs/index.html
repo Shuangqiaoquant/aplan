@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShuangqiaoQuant APlan</title>
+    <meta
+      name="description"
+      content="APlan is an auditable A-share quantitative research lab by ShuangqiaoQuant."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html">ShuangqiaoQuant</a>
+      <nav aria-label="Primary navigation">
+        <a href="#system">系统</a>
+        <a href="#status">状态</a>
+        <a href="#roadmap">路线图</a>
+        <a href="https://github.com/Shuangqiaoquant" rel="noreferrer">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">A-share Quant Research Lab</p>
+          <h1>APlan</h1>
+          <p class="lede">
+            一个面向 A 股的可审计量化投研系统，把行情、公告、策略验证、
+            风控、模拟盘和审计链串成透明的研究闭环。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="./project_intro.md">阅读项目说明</a>
+            <a class="button secondary" href="./public_roadmap.md">查看公开路线图</a>
+          </div>
+        </div>
+        <div class="terminal-panel" aria-label="APlan research status">
+          <div class="terminal-top">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <pre><code>mode: research_only
+strategy_gate: closed
+risk_gate: active
+audit_chain: sha256
+live_broker: disabled
+latest_result: reject until validated</code></pre>
+        </div>
+      </section>
+
+      <section id="system" class="band">
+        <div class="section-heading">
+          <p class="eyebrow">System Value</p>
+          <h2>不是荐股器，而是投研流水线</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <h3>可追溯数据</h3>
+            <p>保留原始快照、处理文件和数据截止时间，降低未来函数与口径漂移风险。</p>
+          </article>
+          <article>
+            <h3>证据约束</h3>
+            <p>候选股票先经过量价筛选，再接受公告、估值、基本面和市场环境检查。</p>
+          </article>
+          <article>
+            <h3>真实风控</h3>
+            <p>组合约束覆盖仓位、现金、行业集中度、换手、回撤和 A 股交易规则。</p>
+          </article>
+          <article>
+            <h3>审计复盘</h3>
+            <p>每日运行结果写入报告和哈希链，让失败、阻断和改进都有据可查。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="status" class="split-section">
+        <div>
+          <p class="eyebrow">Current Status</p>
+          <h2>研究系统已成型，策略仍在孵化</h2>
+          <p>
+            APlan 当前处于研究模式。系统可以生成候选、报告和风险提示，但在策略
+            通过隔离验证、风险检查和审批前，不会生成可执行交易指令。
+          </p>
+        </div>
+        <dl class="status-list">
+          <div>
+            <dt>数据与质量层</dt>
+            <dd>已完成基础接入与质量闸门</dd>
+          </div>
+          <div>
+            <dt>策略与证据层</dt>
+            <dd>框架完成，策略验证进行中</dd>
+          </div>
+          <div>
+            <dt>纸面模拟层</dt>
+            <dd>引擎完成，等待策略审批</dd>
+          </div>
+          <div>
+            <dt>实盘交易</dt>
+            <dd>未连接券商，默认关闭</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="roadmap" class="band quiet">
+        <div class="section-heading">
+          <p class="eyebrow">Public Plan</p>
+          <h2>公开建设，谨慎迭代</h2>
+        </div>
+        <div class="timeline">
+          <article>
+            <span>01</span>
+            <h3>公开研究实验室</h3>
+            <p>发布代码、文档、路线图和研究日志，先建立透明度。</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>策略孵化</h3>
+            <p>补齐证据覆盖，做样本外、多调仓起点和事件研究验证。</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>工具产品化</h3>
+            <p>沉淀为研究看板、审计工具或私有部署服务。</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>机构化评估</h3>
+            <p>在纸面记录和合规路径成熟后，再考虑公司化。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="notice" aria-label="Disclaimer">
+        <strong>免责声明：</strong>
+        APlan 仅用于研究和教育，不构成投资建议、证券推荐或收益承诺。任何报告、
+        候选、回测和模拟盘结果都需要独立验证。
+      </section>
+    </main>
+
+    <footer>
+      <span>ShuangqiaoQuant APlan</span>
+      <a href="./disclaimer.md">Disclaimer</a>
+    </footer>
+  </body>
+</html>

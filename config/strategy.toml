@@ -1,0 +1,26 @@
+[universe]
+include_prefixes = ["000", "001", "002", "003", "300", "301", "600", "601", "603", "605"]
+exclude_st = true
+min_listing_days = 120
+min_avg_turnover_yuan = 50000000
+
+[portfolio]
+max_positions = 10
+max_single_weight = 0.10
+max_industry_weight = 0.30
+commission_rate = 0.0003
+stamp_tax_rate = 0.0005
+slippage_rate = 0.001
+
+[horizon.short]
+holding_days = 10
+momentum_days = 5
+
+[horizon.swing]
+holding_days = 40
+momentum_days = 20
+
+[horizon.medium]
+holding_days = 120
+momentum_days = 60
+
