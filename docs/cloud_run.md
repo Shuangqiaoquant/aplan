@@ -122,7 +122,10 @@ bash scripts/cloud_backfill_data.sh
 
 The script runs these stages:
 
-- Tushare `daily,adj_factor` for up to `DAILY_MAX_DAYS` missing trading days.
+- Tushare `daily` for up to `DAILY_MAX_DAYS` missing weekdays. The default avoids `trade_cal`
+  because some Tushare accounts limit that endpoint to once per hour.
+- Tushare `adj_factor` for up to `DAILY_MAX_DAYS` local daily dates. `ADJ_FACTOR_DELAY`
+  defaults to `65` seconds for accounts limited to about once per minute.
 - Tushare `daily_basic,stk_limit,suspend_d` for up to `EVIDENCE_MAX_DAYS` local daily dates.
 - AkShare securities and spot valuations for the end date.
 - Optional AkShare financial indicators for a provided symbol list.
