@@ -60,7 +60,7 @@ PYTHONPATH=src python3 -m aplan.strategy_cli list
 ```
 
 更完整的本地运行说明见 [docs/local_run.md](docs/local_run.md)。
-本地、GitHub 和腾讯云服务器的分工与云端运行流程见 [docs/cloud_run.md](docs/cloud_run.md)。
+本地、GitHub 和腾讯云服务器的分工、云端运行流程和数据补全任务见 [docs/cloud_run.md](docs/cloud_run.md)。
 
 如果本机网络和构建依赖可用，也可以安装成 editable 包：
 
