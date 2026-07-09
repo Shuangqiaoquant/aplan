@@ -6,6 +6,7 @@ START_DATE="${START_DATE:-20230101}"
 END_DATE="${END_DATE:-$(TZ=Asia/Shanghai date +%Y%m%d)}"
 DAILY_MAX_DAYS="${DAILY_MAX_DAYS:-20}"
 DAILY_DELAY="${DAILY_DELAY:-2.6}"
+ADJ_FACTOR_DELAY="${ADJ_FACTOR_DELAY:-65}"
 EVIDENCE_MAX_DAYS="${EVIDENCE_MAX_DAYS:-1}"
 EVIDENCE_DELAY="${EVIDENCE_DELAY:-3700}"
 CALENDAR_MODE="${CALENDAR_MODE:-tushare}"
@@ -37,19 +38,32 @@ LOG_PATH="logs/backfill_${START_DATE}_${END_DATE}_$(TZ=Asia/Shanghai date +%Y%m%
   echo "start=$START_DATE"
   echo "end=$END_DATE"
   echo "daily_max_days=$DAILY_MAX_DAYS"
+  echo "adj_factor_delay=$ADJ_FACTOR_DELAY"
   echo "evidence_max_days=$EVIDENCE_MAX_DAYS"
   echo "git_commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
   echo
-  echo "== Tushare daily + adj_factor =="
+  echo "== Tushare daily =="
   aplan-sync backfill \
     --root "$ROOT" \
     --start "$START_DATE" \
     --end "$END_DATE" \
-    --datasets daily,adj_factor \
+    --datasets daily \
     --calendar-mode "$CALENDAR_MODE" \
     --max-days "$DAILY_MAX_DAYS" \
     --delay "$DAILY_DELAY" \
+    --workers 1
+
+  echo
+  echo "== Tushare adj_factor =="
+  aplan-sync backfill \
+    --root "$ROOT" \
+    --start "$START_DATE" \
+    --end "$END_DATE" \
+    --datasets adj_factor \
+    --calendar-mode local-daily \
+    --max-days "$DAILY_MAX_DAYS" \
+    --delay "$ADJ_FACTOR_DELAY" \
     --workers 1
 
   echo
