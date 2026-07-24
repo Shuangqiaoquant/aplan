@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from aplan.validation_protocol import freeze_protocol
-from aplan.yinhe_acceptance import run_yinhe_acceptance
+from aplan.yinhe_acceptance import repair_yinhe_turnover_units, run_yinhe_acceptance
 
 
 FIELDS = (
@@ -25,7 +25,13 @@ FIELDS = (
 )
 
 
-def _write_daily(path: Path, day: str, rows: list[tuple[str, float]]) -> None:
+def _write_daily(
+    path: Path,
+    day: str,
+    rows: list[tuple[str, float]],
+    *,
+    turnover_scale: float = 1.0,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
@@ -40,7 +46,7 @@ def _write_daily(path: Path, day: str, rows: list[tuple[str, float]]) -> None:
                     "low": close * 0.99,
                     "close": close,
                     "volume": 1000,
-                    "turnover": close * 1000,
+                    "turnover": close * 1000 * turnover_scale,
                     "is_suspended": 0,
                     "is_limit_up": 0,
                     "is_limit_down": 0,
@@ -119,6 +125,46 @@ class YinheAcceptanceTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "failed")
             self.assertIn("daily_primary_key_uniqueness", result["failed_checks"])
+
+    def test_repair_turnover_units_scales_thousand_yuan_and_resumes_safely(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = self._project(Path(tmp))
+            daily = project / "data" / "processed" / "yinhe_daily"
+            rows = [("300001", 10.0), ("301001", 20.0), ("600000", 12.0)]
+            _write_daily(
+                daily / "20260721.csv",
+                "20260721",
+                rows,
+                turnover_scale=0.001,
+            )
+            _write_daily(
+                daily / "20260722.csv",
+                "20260722",
+                rows,
+                turnover_scale=0.001,
+            )
+
+            repaired = repair_yinhe_turnover_units(
+                project,
+                start_date="20260721",
+                end_date="20260722",
+            )
+            repeated = repair_yinhe_turnover_units(
+                project,
+                start_date="20260721",
+                end_date="20260722",
+            )
+
+            self.assertEqual(repaired["scale"], 1000)
+            self.assertAlmostEqual(repaired["before_unit_median"], 0.001)
+            self.assertAlmostEqual(repaired["after_unit_median"], 1.0)
+            self.assertEqual(repeated["repaired_rows"], repaired["repaired_rows"])
+            accepted = run_yinhe_acceptance(
+                project,
+                start_date="20260721",
+                end_date="20260722",
+            )
+            self.assertNotIn("price_volume_turnover_units", accepted["failed_checks"])
 
 
 if __name__ == "__main__":

@@ -304,7 +304,7 @@ class YinheSyncTests(unittest.TestCase):
             ["20260721", "20260722"],
         )
         self.assertEqual(values[0]["volume"], 1000.0)
-        self.assertEqual(values[1]["turnover"], 11440.0)
+        self.assertEqual(values[1]["turnover"], 11_440_000.0)
 
     def test_audit_daily_coverage_writes_missing_symbols_and_prefix_counts(self) -> None:
         with TemporaryDirectory() as tmp:

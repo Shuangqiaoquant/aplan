@@ -187,6 +187,18 @@ The acceptance result separates mechanical ingestion integrity from strict backt
 readiness. Missing an independent trading calendar, point-in-time security history, or
 verified forward-adjustment continuity is reported as `blocked`, never silently treated
 as passed.
+
+If acceptance infers `turnover / volume / close` near `0.001`, the TGW K-line
+`value_trade` field is in thousands of CNY. Preserve raw files and repair only processed
+daily files with the guarded, resumable migration:
+
+```bash
+aplan-yinhe repair-turnover --start 20230101 --end 20260722
+```
+
+The command refuses to scale data unless the inferred unit is safely within the
+thousand-CNY range. Re-run acceptance afterward to generate a new manifest and data
+version.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

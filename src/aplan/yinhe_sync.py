@@ -149,6 +149,13 @@ def _number(value: Any) -> float:
     return number if math.isfinite(number) else 0.0
 
 
+def _daily_turnover(row: dict[str, Any]) -> float:
+    value_trade = row.get("value_trade")
+    if value_trade not in (None, ""):
+        return _number(value_trade) * 1_000
+    return _number(_first_value(row, "成交额", "turnover", "amount"))
+
+
 def _rows(dataframe: Any) -> list[dict[str, Any]]:
     if dataframe is None:
         return []
@@ -548,7 +555,7 @@ def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[di
                 "low": _number(_first_value(row, "最低价", "low", "low_price")),
                 "close": _number(_first_value(row, "收盘价", "close", "close_price")),
                 "volume": _number(_first_value(row, "成交量", "volume", "volume_trade")),
-                "turnover": _number(_first_value(row, "成交额", "turnover", "value_trade")),
+                "turnover": _daily_turnover(row),
                 "is_suspended": "1"
                 if str(_first_value(row, "是否停牌", "is_suspended", "trading_status") or "").strip()
                 in {"1", "true", "True", "停牌"}
@@ -1500,6 +1507,7 @@ def main() -> None:
             "backfill-range",
             "audit-daily",
             "acceptance",
+            "repair-turnover",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1614,6 +1622,16 @@ def main() -> None:
                 end_date=args.end,
                 calendar_file=Path(args.calendar_file).resolve() if args.calendar_file else None,
                 output_dir=Path(args.acceptance_output).resolve() if args.acceptance_output else None,
+            )
+        elif args.command == "repair-turnover":
+            if not args.start or not args.end:
+                raise SystemExit("repair-turnover 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            from .yinhe_acceptance import repair_yinhe_turnover_units
+
+            result = repair_yinhe_turnover_units(
+                root,
+                start_date=args.start,
+                end_date=args.end,
             )
         elif args.command == "snapshot":
             if not args.date:

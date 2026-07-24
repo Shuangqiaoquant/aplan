@@ -212,6 +212,121 @@ def _adjustment_check(project: Path, start: str, end: str) -> dict[str, Any]:
     )
 
 
+def _infer_turnover_unit(files: list[Path], *, sample_limit: int = 100_000) -> float | None:
+    samples: list[float] = []
+    for path in files:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                close = _float(row.get("close"))
+                volume = _float(row.get("volume"))
+                turnover = _float(row.get("turnover"))
+                if close and volume and turnover and close > 0 and volume > 0 and turnover > 0:
+                    samples.append(turnover / volume / close)
+                    if len(samples) >= sample_limit:
+                        return median(samples)
+    return median(samples) if samples else None
+
+
+def repair_yinhe_turnover_units(
+    project: Path,
+    *,
+    start_date: str,
+    end_date: str,
+) -> dict[str, Any]:
+    start = _date_key(start_date)
+    end = _date_key(end_date)
+    if not start or not end or start > end:
+        raise ValueError("修复起止日期无效")
+    daily_dir = project / "data" / "processed" / "yinhe_daily"
+    files = sorted(
+        path for path in daily_dir.glob("*.csv") if start <= _date_key(path.stem) <= end
+    )
+    if not files:
+        raise ValueError(f"未找到待修复银河日线：{daily_dir}")
+    state_path = project / "state" / f"yinhe_turnover_repair_{start}_{end}.json"
+    state = _load_json(state_path) or {}
+    completed = set(state.get("completed_files") or [])
+    scale = float(state.get("scale") or 0)
+    before_median = state.get("before_unit_median")
+    if not scale:
+        before_median = _infer_turnover_unit(files)
+        if before_median is None:
+            raise ValueError("无法从现有数据推断成交额单位")
+        if 0.2 <= before_median <= 5.0:
+            return {
+                "status": "already_normalized",
+                "files": len(files),
+                "unit_median": before_median,
+                "scale": 1,
+            }
+        if not 0.0002 <= before_median <= 0.005:
+            raise ValueError(f"成交额单位比值 {before_median} 不在可安全修复范围")
+        scale = 1_000.0
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    repaired_rows = int(state.get("repaired_rows") or 0)
+    for index, path in enumerate(files, 1):
+        relative = str(path.relative_to(project))
+        if relative in completed:
+            continue
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = tuple(reader.fieldnames or ())
+            rows = list(reader)
+        if "turnover" not in fieldnames:
+            raise ValueError(f"{path} 缺少 turnover 字段")
+        for row in rows:
+            value = _float(row.get("turnover"))
+            if value is not None:
+                row["turnover"] = value * scale
+                repaired_rows += 1
+        temporary = path.with_suffix(".csv.tmp")
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        temporary.replace(path)
+        completed.add(relative)
+        state = {
+            "schema_version": 1,
+            "status": "running",
+            "start_date": start,
+            "end_date": end,
+            "scale": scale,
+            "before_unit_median": before_median,
+            "completed_files": sorted(completed),
+            "repaired_rows": repaired_rows,
+        }
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if index % 100 == 0 or index == len(files):
+            print(f"银河成交额单位修复：{index}/{len(files)}")
+
+    after_median = _infer_turnover_unit(files)
+    state.update(
+        {
+            "status": "completed",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "after_unit_median": after_median,
+            "raw_data_preserved": True,
+        }
+    )
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_path = project / "data" / "processed" / "yinhe_turnover_unit_manifest.json"
+    manifest = {
+        key: value for key, value in state.items() if key != "completed_files"
+    }
+    manifest["state_path"] = str(state_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "status": "completed",
+        "files": len(files),
+        "repaired_rows": repaired_rows,
+        "scale": scale,
+        "before_unit_median": before_median,
+        "after_unit_median": after_median,
+        "state_path": str(state_path),
+        "manifest_path": str(manifest_path),
+    }
 def render_acceptance_report(report: dict[str, Any]) -> str:
     profile = report["dataset_profile"]
     readiness = report["readiness"]
@@ -442,14 +557,25 @@ def run_yinhe_acceptance(
             "任何变化必须新建协议版本并重新冻结。",
         )
     )
-    range_ok = actual_dates[0] <= start and actual_dates[-1] >= end
+    if expected_dates:
+        range_ok = actual_dates[0] <= expected_dates[0] and actual_dates[-1] >= expected_dates[-1]
+        range_status = "pass" if range_ok else "fail"
+    else:
+        range_ok = False
+        range_status = "blocked"
     checks.append(
         _check(
             "requested_date_range",
             "completeness",
-            "pass" if range_ok else "fail",
+            range_status,
             "critical",
-            "数据覆盖目标起止范围" if range_ok else "数据尚未覆盖目标起止范围",
+            (
+                "数据覆盖独立日历定义的目标交易日边界"
+                if range_status == "pass"
+                else "数据未覆盖独立日历定义的边界"
+                if range_status == "fail"
+                else "缺少独立交易日历，无法判定首尾自然日对应的交易日"
+            ),
             {
                 "requested_start": start,
                 "requested_end": end,
@@ -457,7 +583,7 @@ def run_yinhe_acceptance(
                 "actual_end": actual_dates[-1],
             },
             "缺少首尾区间会使训练、样本外或最终留出集不完整。",
-            "继续断点回填缺失年度后重新验收。",
+            "接入独立交易日历；若确认缺少边界交易日，再继续断点回填。",
         )
     )
     calendar_status = "pass" if expected_dates and not missing_dates else ("fail" if expected_dates else "blocked")
@@ -585,7 +711,7 @@ def run_yinhe_acceptance(
         _check(
             "price_volume_turnover_units",
             "consistency",
-            "pass" if units_ok else "warn",
+            "pass" if units_ok else "fail",
             "high",
             "成交额/成交量/价格关系支持元、股口径" if units_ok else "无法确认成交额与成交量单位",
             {
@@ -648,8 +774,8 @@ def run_yinhe_acceptance(
             "sha256": protocol["protocol_sha256"],
         },
         "readiness": {
-            "ingestion_integrity_ready": not critical_fail,
-            "raw_price_research_ready": not critical_fail and coverage_ok and gem_ok,
+            "ingestion_integrity_ready": not any_fail,
+            "raw_price_research_ready": not any_fail and coverage_ok and gem_ok and units_ok,
             "strict_backtest_ready": status in {"passed", "passed_with_warnings"},
             "execution_allowed": False,
         },
