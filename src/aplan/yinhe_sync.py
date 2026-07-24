@@ -470,12 +470,46 @@ def audit_daily_coverage(root: Path, trade_date: str, symbols: list[str]) -> dic
         raise ValueError(f"未找到银河日线文件：{daily_path}")
     with daily_path.open("r", encoding="utf-8-sig", newline="") as handle:
         daily = list(csv.DictReader(handle))
+    requested = set(symbols)
+    observed = {
+        _strip_suffix(row.get("symbol", ""))
+        for row in daily
+        if len(_strip_suffix(row.get("symbol", ""))) == 6
+    }
+    outside = sorted(observed - requested)
     result = {
         "trade_date": trade_date,
         "daily_rows": len(daily),
         "daily_path": str(daily_path),
+        "observed_outside_pool": len(outside),
     }
     result.update(_daily_coverage(root, trade_date, symbols, daily))
+
+    securities_path = root / "data" / "processed" / "yinhe_securities.csv"
+    if outside and securities_path.exists():
+        with securities_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            security_rows = {
+                _strip_suffix(row.get("symbol", "")): row
+                for row in csv.DictReader(handle)
+            }
+        outside_by_type: dict[str, int] = {}
+        outside_samples: list[dict[str, str]] = []
+        for symbol in outside:
+            security = security_rows.get(symbol, {})
+            security_type = str(security.get("security_type", "") or "unknown")
+            outside_by_type[security_type] = outside_by_type.get(security_type, 0) + 1
+            if len(outside_samples) < 20:
+                outside_samples.append(
+                    {
+                        "symbol": symbol,
+                        "name": str(security.get("name", "")),
+                        "market": str(security.get("market", "")),
+                        "security_type": security_type,
+                        "security_status": str(security.get("security_status", "")),
+                    }
+                )
+        result["outside_by_security_type"] = outside_by_type
+        result["outside_samples"] = outside_samples
     return result
 
 

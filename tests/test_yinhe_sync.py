@@ -271,7 +271,14 @@ class YinheSyncTests(unittest.TestCase):
             daily.write_text(
                 "symbol,trade_date,close\n"
                 "000001,20260722,10\n"
-                "600000,20260722,11\n",
+                "600000,20260722,11\n"
+                "002001,20260722,12\n",
+                encoding="utf-8",
+            )
+            securities = root / "data" / "processed" / "yinhe_securities.csv"
+            securities.write_text(
+                "symbol,name,market,security_type,security_status\n"
+                "002001,新和成,szse,99002,1\n",
                 encoding="utf-8",
             )
 
@@ -285,6 +292,9 @@ class YinheSyncTests(unittest.TestCase):
             self.assertEqual(result["missing_symbols"], 2)
             self.assertEqual(result["coverage_rate"], 0.5)
             self.assertEqual(result["missing_by_prefix"], {"300": 1, "688": 1})
+            self.assertEqual(result["observed_outside_pool"], 1)
+            self.assertEqual(result["outside_by_security_type"], {"99002": 1})
+            self.assertEqual(result["outside_samples"][0]["name"], "新和成")
             self.assertEqual(
                 (root / "data" / "processed" / "yinhe_daily_missing" / "20260722.txt")
                 .read_text(encoding="utf-8")
