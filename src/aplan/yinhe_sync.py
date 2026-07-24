@@ -42,6 +42,9 @@ SECURITY_FIELDS = (
     "industry",
     "is_st",
     "is_delisting_risk",
+    "market",
+    "security_type",
+    "security_status",
 )
 
 SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
@@ -343,7 +346,9 @@ def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         if len(symbol) != 6 or not symbol.isdigit() or symbol in seen:
             continue
-        name = str(_first_value(row, "证券简称", "A股简称", "name", "security_name") or "").strip()
+        name = str(
+            _first_value(row, "证券简称", "A股简称", "name", "security_name", "symbol") or ""
+        ).strip()
         if not name:
             continue
         seen.add(symbol)
@@ -355,6 +360,13 @@ def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "industry": str(_first_value(row, "所属行业", "industry") or "未知").strip() or "未知",
                 "is_st": "1" if "ST" in name.upper() else "0",
                 "is_delisting_risk": "1" if "退" in name else "0",
+                "market": str(_first_value(row, "_query_market", "market_type", "market") or "").strip(),
+                "security_type": str(
+                    _first_value(row, "证券类型", "security_type", "securityType") or ""
+                ).strip(),
+                "security_status": str(
+                    _first_value(row, "证券状态", "security_status", "securityStatus") or ""
+                ).strip(),
             }
         )
     return sorted(output, key=lambda item: item["symbol"])
@@ -866,8 +878,15 @@ class YinheClient:
 
     def fetch_securities(self, markets: tuple[str, ...] = ("sse", "szse")) -> list[dict[str, Any]]:
         tgw = self._sdk()
-        requests = [build_security_info_request(tgw, market) for market in markets]
-        return self.query_securities_info(requests)
+        rows: list[dict[str, Any]] = []
+        for market in markets:
+            request = build_security_info_request(tgw, market)
+            market_rows = self.query_securities_info(request)
+            for row in market_rows:
+                item = dict(row)
+                item.setdefault("_query_market", market)
+                rows.append(item)
+        return rows
 
 
 def _with_logged_in_client(config: YinheConfig, action: Callable[[YinheClient], list[dict[str, Any]]]) -> list[dict[str, Any]]:

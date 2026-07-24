@@ -143,7 +143,15 @@ class YinheSyncTests(unittest.TestCase):
 
     def test_security_rows_normalize_to_security_schema(self) -> None:
         rows = [
-            {"证券代码": "600000.SH", "证券简称": "浦发银行", "上市日期": "1999-11-10", "所属行业": "银行"},
+            {
+                "证券代码": "600000.SH",
+                "证券简称": "浦发银行",
+                "上市日期": "1999-11-10",
+                "所属行业": "银行",
+                "_query_market": "sse",
+                "security_type": "stock",
+                "security_status": "listed",
+            },
             {"A股代码": "000001.SZ", "A股简称": "*ST测试", "A股上市日期": "1991-04-03"},
             {"code": "300001", "name": "创业测试", "list_date": "2010/01/01"},
         ]
@@ -154,6 +162,27 @@ class YinheSyncTests(unittest.TestCase):
         self.assertEqual(values[0]["is_st"], "1")
         self.assertEqual(values[1]["list_date"], "2010-01-01")
         self.assertEqual(values[2]["industry"], "银行")
+        self.assertEqual(values[2]["market"], "sse")
+        self.assertEqual(values[2]["security_type"], "stock")
+        self.assertEqual(values[2]["security_status"], "listed")
+
+    def test_fetch_securities_queries_markets_separately_and_combines_rows(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with patch.object(
+            client,
+            "query_securities_info",
+            side_effect=[
+                [{"security_code": "600000", "symbol": "浦发银行"}],
+                [{"security_code": "000001", "symbol": "平安银行"}],
+            ],
+        ) as query:
+            rows = client.fetch_securities()
+
+        self.assertEqual(query.call_count, 2)
+        self.assertEqual([row["security_code"] for row in rows], ["600000", "000001"])
+        self.assertEqual([row["_query_market"] for row in rows], ["sse", "szse"])
 
     def test_build_symbol_pool_keeps_regular_shanghai_and_shenzhen_a_shares(self) -> None:
         with TemporaryDirectory() as tmp:
