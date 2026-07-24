@@ -534,15 +534,27 @@ class YinheSyncTests(unittest.TestCase):
 
             self.assertEqual(result["query_count"], 2)
             self.assertEqual(result["returned_dates"], 2)
-            self.assertEqual(result["written_dates"], 2)
+            self.assertEqual(result["merged_dates"], 2)
+            self.assertEqual(result["chunks"], 1)
+            self.assertEqual(result["reused_chunks"], 0)
             self.assertEqual(result["coverage_by_date"]["20260701"], 1.0)
             self.assertEqual(result["coverage_by_date"]["20260702"], 0.5)
             self.assertTrue(
                 (root / "data" / "processed" / "yinhe_daily" / "20260701.csv").exists()
             )
             self.assertTrue(
-                (root / "data" / "raw" / "yinhe" / "20260702" / "daily.json").exists()
+                (Path(result["checkpoint_dir"]) / "chunk_0001.json").exists()
             )
+            resumed = backfill_daily_range(
+                root,
+                "20260701",
+                "20260703",
+                symbols=["600000", "000001"],
+                fetcher=lambda: self.fail("completed chunk should be reused"),
+            )
+            self.assertEqual(resumed["query_count"], 0)
+            self.assertEqual(resumed["reused_chunks"], 1)
+            self.assertEqual(resumed["coverage_by_date"]["20260701"], 1.0)
 
 
 if __name__ == "__main__":

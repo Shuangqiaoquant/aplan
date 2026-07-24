@@ -148,6 +148,12 @@ aplan-yinhe backfill-range \
 Check that `returned_dates`, `daily_rows`, and the generated CSV files are reasonable
 before expanding the symbol list. Existing date files are preserved unless `--overwrite`
 is passed.
+
+For a large pool, range queries run in chunks of 250 symbols by default. Each completed
+chunk is merged into the per-date CSV files and recorded below
+`data/raw/yinhe/ranges/`. Re-running the same command resumes from those checkpoints.
+Use a smaller `--chunk-size` on a low-memory server. Do not pass `--overwrite` when
+resuming, because it intentionally ignores checkpoints and re-queries every chunk.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

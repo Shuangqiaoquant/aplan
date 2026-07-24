@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import multiprocessing
@@ -1169,6 +1170,7 @@ def backfill_daily_range(
     symbols: list[str],
     config: YinheConfig | None = None,
     interval: str | int = "day",
+    chunk_size: int = 250,
     overwrite: bool = False,
     fetcher: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -1178,63 +1180,137 @@ def backfill_daily_range(
     end_key = _date_key(end_date)
     if not start_key or not end_key or start_key > end_key:
         raise ValueError("开始和结束日期必须有效，且开始日期不能晚于结束日期")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size 必须大于 0")
 
-    rows = (
-        fetcher()
-        if fetcher
-        else _with_logged_in_client(
-            config or YinheConfig.from_env(),
-            lambda client: client.fetch_daily_range(
-                symbols,
-                start_key,
-                end_key,
-                interval=interval,
-            ),
-        )
+    pool_key = hashlib.sha256(
+        f"{start_key}|{end_key}|{interval}|{chunk_size}|{'|'.join(symbols)}".encode()
+    ).hexdigest()[:12]
+    checkpoint_dir = (
+        root
+        / "data"
+        / "raw"
+        / "yinhe"
+        / "ranges"
+        / f"{start_key}_{end_key}_{pool_key}"
     )
-    daily = [
-        row
-        for row in normalize_daily_rows(rows, end_key)
-        if start_key <= row["trade_date"] <= end_key
-    ]
-    daily_by_date: dict[str, list[dict[str, Any]]] = {}
-    for row in daily:
-        daily_by_date.setdefault(row["trade_date"], []).append(row)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    chunks = (
+        [symbols]
+        if fetcher is not None
+        else [
+            symbols[offset : offset + chunk_size]
+            for offset in range(0, len(symbols), chunk_size)
+        ]
+    )
+    returned_dates: set[str] = set()
+    merged_dates: set[str] = set()
+    raw_rows = 0
+    daily_rows = 0
+    query_count = 0
+    reused_chunks = 0
 
-    raw_by_date: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        day = _date_key(
-            _first_value(
-                row,
-                "交易日期",
-                "trade_date",
-                "date",
-                "kline_time",
-                "orig_time",
-                "K线时间",
+    def merge_chunk(
+        rows: list[dict[str, Any]],
+        chunk_symbols: list[str],
+        chunk_index: int,
+    ) -> dict[str, Any]:
+        daily = [
+            row
+            for row in normalize_daily_rows(rows, end_key)
+            if start_key <= row["trade_date"] <= end_key
+        ]
+        daily_by_date: dict[str, list[dict[str, Any]]] = {}
+        for row in daily:
+            daily_by_date.setdefault(row["trade_date"], []).append(row)
+
+        for day, day_rows in sorted(daily_by_date.items()):
+            processed_path = root / "data" / "processed" / "yinhe_daily" / f"{day}.csv"
+            existing_rows: list[dict[str, Any]] = []
+            if processed_path.exists():
+                with processed_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    existing_rows = list(csv.DictReader(handle))
+            merged = {
+                _strip_suffix(row.get("symbol", "")): row
+                for row in existing_rows
+                if len(_strip_suffix(row.get("symbol", ""))) == 6
+            }
+            for row in day_rows:
+                symbol = _strip_suffix(row.get("symbol", ""))
+                if overwrite or symbol not in merged:
+                    merged[symbol] = row
+            _write_csv(
+                processed_path,
+                sorted(merged.values(), key=lambda item: item["symbol"]),
+                DAILY_FIELDS,
             )
-        )
-        if start_key <= day <= end_key:
-            raw_by_date.setdefault(day, []).append(row)
 
-    written_dates: list[str] = []
-    skipped_dates: list[str] = []
+        raw_path = checkpoint_dir / f"chunk_{chunk_index:04d}.json"
+        _write_snapshot(raw_path, "QueryKlineRange", rows)
+        metadata = {
+            "chunk_index": chunk_index,
+            "symbols": chunk_symbols,
+            "raw_rows": len(rows),
+            "daily_rows": len(daily),
+            "returned_dates": sorted(daily_by_date),
+            "raw_path": str(raw_path),
+        }
+        done_path = checkpoint_dir / f"chunk_{chunk_index:04d}.done.json"
+        done_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return metadata
+
+    client: YinheClient | None = None
+    if fetcher is None:
+        client = YinheClient(config or YinheConfig.from_env())
+        if not client.login():
+            raise YinheUpstreamError("银河登录失败，请检查账号、密码、IP、端口和账号权限")
+    try:
+        for chunk_index, chunk_symbols in enumerate(chunks, 1):
+            done_path = checkpoint_dir / f"chunk_{chunk_index:04d}.done.json"
+            if done_path.exists() and not overwrite:
+                metadata = json.loads(done_path.read_text(encoding="utf-8"))
+                reused_chunks += 1
+                print(
+                    f"银河区间回填块：{chunk_index}/{len(chunks)}，"
+                    f"checkpoint=复用，symbols={len(chunk_symbols)}"
+                )
+            else:
+                if fetcher:
+                    rows = fetcher()
+                else:
+                    assert client is not None
+                    rows = client.fetch_daily_range(
+                        chunk_symbols,
+                        start_key,
+                        end_key,
+                        interval=interval,
+                    )
+                metadata = merge_chunk(rows, chunk_symbols, chunk_index)
+                query_count += len(chunk_symbols)
+                merged_dates.update(metadata["returned_dates"])
+                print(
+                    f"银河区间回填块：{chunk_index}/{len(chunks)}，"
+                    f"symbols={len(chunk_symbols)}，K线={metadata['daily_rows']}"
+                )
+            raw_rows += int(metadata["raw_rows"])
+            daily_rows += int(metadata["daily_rows"])
+            returned_dates.update(metadata["returned_dates"])
+    finally:
+        if client is not None:
+            client.close()
+
     coverage_by_date: dict[str, float] = {}
     missing_by_date: dict[str, int] = {}
-    for day in sorted(daily_by_date):
+    for day in sorted(returned_dates):
         processed_path = root / "data" / "processed" / "yinhe_daily" / f"{day}.csv"
-        if processed_path.exists() and not overwrite:
-            skipped_dates.append(day)
+        if not processed_path.exists():
             continue
-        day_rows = daily_by_date[day]
-        _write_snapshot(
-            root / "data" / "raw" / "yinhe" / day / "daily.json",
-            "QueryKlineRange",
-            raw_by_date.get(day, []),
-        )
-        _write_csv(processed_path, day_rows, DAILY_FIELDS)
+        with processed_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            day_rows = list(csv.DictReader(handle))
         coverage = _daily_coverage(root, day, symbols, day_rows)
-        written_dates.append(day)
         coverage_by_date[day] = coverage["coverage_rate"]
         missing_by_date[day] = coverage["missing_symbols"]
 
@@ -1242,14 +1318,18 @@ def backfill_daily_range(
         "start_date": start_key,
         "end_date": end_key,
         "symbols": len(symbols),
-        "query_count": len(symbols),
-        "raw_rows": len(rows),
-        "daily_rows": len(daily),
-        "returned_dates": len(daily_by_date),
-        "written_dates": len(written_dates),
-        "skipped_existing_dates": len(skipped_dates),
-        "first_returned_date": min(daily_by_date, default=None),
-        "last_returned_date": max(daily_by_date, default=None),
+        "planned_query_count": len(symbols),
+        "query_count": query_count,
+        "chunk_size": chunk_size,
+        "chunks": len(chunks),
+        "reused_chunks": reused_chunks,
+        "raw_rows": raw_rows,
+        "daily_rows": daily_rows,
+        "returned_dates": len(returned_dates),
+        "merged_dates": len(merged_dates),
+        "first_returned_date": min(returned_dates, default=None),
+        "last_returned_date": max(returned_dates, default=None),
+        "checkpoint_dir": str(checkpoint_dir),
         "coverage_by_date": coverage_by_date,
         "missing_by_date": missing_by_date,
     }
@@ -1411,8 +1491,13 @@ def main() -> None:
     parser.add_argument("--symbols-file", help="包含六位股票代码的文本/CSV文件；daily/snapshot 需要")
     parser.add_argument("--interval", default="day", help="K线周期，默认 day；可用 1m/5m/day/week/month 等")
     parser.add_argument("--max-days", type=int, help="backfill-daily 本批最多处理多少个工作日")
+    parser.add_argument("--chunk-size", type=int, default=250, help="backfill-range 每块股票数量，默认 250")
     parser.add_argument("--delay", type=float, default=0.0, help="backfill-daily 每个日期之间等待秒数，默认 0")
-    parser.add_argument("--overwrite", action="store_true", help="backfill-daily 覆盖已存在的日期文件")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="强制覆盖已存在数据；backfill-range 同时忽略检查点并重新查询",
+    )
     parser.add_argument("--level-type", type=int, default=1, help="快照 Level 类型，默认 1")
     parser.add_argument("--begin-time", type=int, default=0, help="查询开始时间，默认 0；可试 93000000")
     parser.add_argument("--end-time", type=int, default=0, help="查询结束时间，默认 0；可试 150000000")
@@ -1475,6 +1560,7 @@ def main() -> None:
                 symbols=symbols,
                 config=YinheConfig.from_env(args.env_file),
                 interval=args.interval,
+                chunk_size=args.chunk_size,
                 overwrite=args.overwrite,
             )
         elif args.command == "audit-daily":
