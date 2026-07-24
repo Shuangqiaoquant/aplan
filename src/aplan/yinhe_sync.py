@@ -369,9 +369,15 @@ def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         previous = selected.get(symbol)
         expected_market = _infer_market(symbol)
-        if previous is None or (
-            market == expected_market and previous.get("market") != expected_market
-        ):
+        item_score = (
+            item["security_type"] in A_SHARE_SECURITY_TYPES,
+            market == expected_market,
+        )
+        previous_score = (
+            previous is not None and previous.get("security_type") in A_SHARE_SECURITY_TYPES,
+            previous is not None and previous.get("market") == expected_market,
+        )
+        if previous is None or item_score > previous_score:
             selected[symbol] = item
     return sorted(selected.values(), key=lambda item: item["symbol"])
 

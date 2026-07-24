@@ -152,7 +152,19 @@ class YinheSyncTests(unittest.TestCase):
                 "security_type": "stock",
                 "security_status": "listed",
             },
-            {"A股代码": "000001.SZ", "A股简称": "*ST测试", "A股上市日期": "1991-04-03"},
+            {
+                "security_code": "000001",
+                "symbol": "长和",
+                "_query_market": "szse",
+                "security_type": "07003",
+            },
+            {
+                "A股代码": "000001.SZ",
+                "A股简称": "*ST测试",
+                "A股上市日期": "1991-04-03",
+                "_query_market": "szse",
+                "security_type": "02001",
+            },
             {"code": "300001", "name": "创业测试", "list_date": "2010/01/01"},
             {
                 "security_code": "000001",
@@ -167,6 +179,7 @@ class YinheSyncTests(unittest.TestCase):
         self.assertEqual([item["symbol"] for item in values], ["000001", "300001", "600000"])
         self.assertEqual(values[0]["is_st"], "1")
         self.assertEqual(values[0]["name"], "*ST测试")
+        self.assertEqual(values[0]["security_type"], "02001")
         self.assertEqual(values[1]["list_date"], "2010-01-01")
         self.assertEqual(values[2]["industry"], "银行")
         self.assertEqual(values[2]["market"], "sse")
