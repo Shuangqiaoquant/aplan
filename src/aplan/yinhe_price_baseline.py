@@ -405,6 +405,11 @@ def _rolling_metrics(
 
 
 def _render_report(document: dict[str, Any]) -> str:
+    source_note = (
+        "当前使用银河前复权价格与等权市场代理；历史股票池和官方基准仍未通过严格验收。"
+        if document["price_mode"] == "forward_adjusted"
+        else "当前使用未复权价格与等权市场代理，只可用于研究管线校验，不可作为严格回测或交易依据。"
+    )
     lines = [
         "# 银河纯量价暂定基线",
         "",
@@ -414,7 +419,7 @@ def _render_report(document: dict[str, Any]) -> str:
         f"- 信号数量：{document['data_profile']['signals']}",
         f"- 成交结果：{document['data_profile']['results']}",
         "",
-        "> 当前使用未复权价格与等权市场代理，只可用于研究管线校验，不可作为严格回测或交易依据。",
+        f"> {source_note}",
         "",
         "| 周期 | 训练期起点通过 | 训练期中位超额 | 2025样本外起点通过 | 2025样本外中位超额 |",
         "|---:|---:|---:|---:|---:|",
@@ -458,7 +463,32 @@ def run_yinhe_price_baseline(
     time_design = protocol["time_design"]
     costs = protocol["costs"]
     horizons = tuple(int(value) for value in protocol["horizons"]["evaluation_days"])
-    daily_dir = project / "data" / "processed" / "yinhe_daily"
+    adjustment_manifest_path = (
+        project / "data" / "processed" / "yinhe_adj_factor" / "manifest.json"
+    )
+    adjustment_manifest = (
+        json.loads(adjustment_manifest_path.read_text(encoding="utf-8"))
+        if adjustment_manifest_path.exists()
+        else {}
+    )
+    raw_daily_dir = project / "data" / "processed" / "yinhe_daily"
+    raw_paths = _daily_paths(raw_daily_dir, start_date, end_date)
+    raw_coverage_start = raw_paths[0].stem if raw_paths else _date_key(start_date)
+    raw_coverage_end = raw_paths[-1].stem if raw_paths else _date_key(end_date)
+    adjustment_ready = bool(
+        adjustment_manifest.get("status") == "validated"
+        and adjustment_manifest.get("continuity_breaks") == 0
+        and adjustment_manifest.get("missing_factor_rows") == 0
+        and adjustment_manifest.get("raw_prices_preserved") is True
+        and _date_key(adjustment_manifest.get("coverage_start")) <= raw_coverage_start
+        and _date_key(adjustment_manifest.get("coverage_end")) >= raw_coverage_end
+    )
+    price_mode = "forward_adjusted" if adjustment_ready else "raw_unadjusted"
+    daily_dir = (
+        project / "data" / "processed" / "yinhe_daily_qfq"
+        if adjustment_ready
+        else raw_daily_dir
+    )
     paths = _daily_paths(daily_dir, start_date, end_date)
     if not paths:
         raise ValueError(f"未找到银河日线 CSV：{daily_dir}")
@@ -684,8 +714,20 @@ def run_yinhe_price_baseline(
     }
     output = output_dir or project / "reports" / "yinhe_price_baseline"
     output.mkdir(parents=True, exist_ok=True)
+    blocked_checks = [
+        "point_in_time_security_states",
+        "survivorship_bias",
+        "official_market_and_industry_benchmarks",
+        "strict_information_timing",
+    ]
+    if not adjustment_ready:
+        blocked_checks.insert(0, "forward_adjustment_continuity")
     document: dict[str, Any] = {
-        "status": "provisional_raw_price_only",
+        "status": (
+            "provisional_adjusted_price_only"
+            if adjustment_ready
+            else "provisional_raw_price_only"
+        ),
         "generated_at": datetime.now(UTC).isoformat(),
         "model_id": baseline["model_id"],
         "research_only": True,
@@ -694,6 +736,10 @@ def run_yinhe_price_baseline(
         "protocol_sha256": loaded_protocol["protocol_sha256"],
         "parameters": parameters,
         "benchmark": "daily_equal_weight_open_return_proxy",
+        "price_mode": price_mode,
+        "adjustment_manifest": (
+            str(adjustment_manifest_path) if adjustment_ready else None
+        ),
         "data_profile": {
             "first_date": analysis_paths[0].stem,
             "last_date": analysis_paths[-1].stem,
@@ -706,13 +752,7 @@ def run_yinhe_price_baseline(
         "selection_validation": selection_validation,
         "final_holdout_opened": open_final_holdout,
         "horizons": horizon_records,
-        "blocked_checks": [
-            "forward_adjustment_continuity",
-            "point_in_time_security_states",
-            "survivorship_bias",
-            "official_market_and_industry_benchmarks",
-            "strict_information_timing",
-        ],
+        "blocked_checks": blocked_checks,
     }
     (output / "latest.json").write_text(
         json.dumps(document, ensure_ascii=False, indent=2),

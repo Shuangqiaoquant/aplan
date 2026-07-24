@@ -199,6 +199,23 @@ aplan-yinhe repair-turnover --start 20230101 --end 20260722
 The command refuses to scale data unless the inferred unit is safely within the
 thousand-CNY range. Re-run acceptance afterward to generate a new manifest and data
 version.
+
+Install the AmazingData local-cache dependency and build a resumable forward-adjusted
+price layer from Galaxy backward factors:
+
+```bash
+python -m pip install tables
+
+aplan-yinhe adjustment-ad \
+  --start 20230101 \
+  --end 20260724 \
+  --symbols-file data/processed/yinhe_symbols.txt \
+  --chunk-size 50
+```
+
+The command preserves `yinhe_daily`, stores factors in SQLite, writes adjusted files to
+`yinhe_daily_qfq`, saves the official Galaxy calendar, and validates continuity around
+factor changes. Re-running without `--overwrite` reuses completed factor chunks.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

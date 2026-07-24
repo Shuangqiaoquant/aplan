@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -191,3 +192,53 @@ class YinhePriceBaselineTests(unittest.TestCase):
             self.assertLess(report["data_profile"]["last_date"], "20260101")
             self.assertGreaterEqual(report["data_profile"]["available_last_date"], "20260101")
             self.assertTrue(all(item["signal_date"] < "20260101" for item in trades))
+
+    def test_runner_prefers_validated_forward_adjusted_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            config = project / "config"
+            config.mkdir()
+            source = Path(__file__).resolve().parents[1] / "config" / "validation_protocol.toml"
+            (config / "validation_protocol.toml").write_bytes(source.read_bytes())
+            freeze_protocol(project, change_reason="adjusted baseline test")
+            raw_paths = _write_market(project)
+            raw_dir = project / "data" / "processed" / "yinhe_daily"
+            adjusted_dir = project / "data" / "processed" / "yinhe_daily_qfq"
+            shutil.copytree(raw_dir, adjusted_dir)
+            factor_dir = project / "data" / "processed" / "yinhe_adj_factor"
+            factor_dir.mkdir()
+            (factor_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "validated",
+                        "continuity_breaks": 0,
+                        "missing_factor_rows": 0,
+                        "raw_prices_preserved": True,
+                        "coverage_start": raw_paths[0].stem,
+                        "coverage_end": raw_paths[-1].stem,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            acceptance = project / "reports" / "yinhe_acceptance"
+            acceptance.mkdir(parents=True)
+            (acceptance / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "data_version": "test-adjusted-v1",
+                        "readiness": {"raw_price_research_ready": True},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_yinhe_price_baseline(
+                project,
+                start_date=raw_paths[0].stem,
+                end_date="20991231",
+            )
+            report = json.loads(Path(result["report_json"]).read_text(encoding="utf-8"))
+
+            self.assertEqual(result["status"], "provisional_adjusted_price_only")
+            self.assertEqual(report["price_mode"], "forward_adjusted")
+            self.assertNotIn("forward_adjustment_continuity", report["blocked_checks"])

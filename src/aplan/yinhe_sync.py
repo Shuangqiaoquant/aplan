@@ -1596,6 +1596,7 @@ def main() -> None:
             "audit-daily",
             "acceptance",
             "repair-turnover",
+            "adjustment-ad",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1720,6 +1721,23 @@ def main() -> None:
                 root,
                 start_date=args.start,
                 end_date=args.end,
+            )
+        elif args.command == "adjustment-ad":
+            if not args.start or not args.end:
+                raise SystemExit("adjustment-ad 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit("adjustment-ad 必须通过 --symbols 或 --symbols-file 提供股票代码")
+            from .yinhe_adjustment import sync_and_build_adjustment
+
+            result = sync_and_build_adjustment(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                symbols=symbols,
+                config=YinheConfig.from_env(args.env_file),
+                chunk_size=args.chunk_size,
+                overwrite=args.overwrite,
             )
         elif args.command == "snapshot":
             if not args.date:
