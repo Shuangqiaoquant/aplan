@@ -83,7 +83,19 @@ class FakeAmazingData:
 
         def query_snapshot(self, code_list, **_kwargs):
             FakeAmazingData.last_code_list = code_list
-            return {"600000.SH": [{"code": "600000.SH", "last": "10.3"}]}
+            return [
+                {
+                    20260706: {
+                        "600000.SH": [
+                            {
+                                "trade_time": datetime(2026, 7, 6, 15, 0),
+                                "last": "10.3",
+                            }
+                        ]
+                    }
+                },
+                [],
+            ]
 
 
 class YinheSyncTests(unittest.TestCase):
@@ -140,7 +152,37 @@ class YinheSyncTests(unittest.TestCase):
 
         self.assertEqual(FakeAmazingData.last_calendar, [20260706])
         self.assertEqual(FakeAmazingData.last_code_list, ["600000.SH"])
+        self.assertEqual(rows[0]["code"], "600000.SH")
         self.assertEqual(rows[0]["last"], "10.3")
+
+    def test_amazing_data_snapshot_surfaces_sdk_error_list(self) -> None:
+        class ErrorAmazingData(FakeAmazingData):
+            class MarketData:
+                def __init__(self, _calendar):
+                    pass
+
+                def query_snapshot(self, _code_list, **_kwargs):
+                    return [{}, ["历史快照无权限"]]
+
+        config = type(
+            "Config",
+            (),
+            {
+                "username": "user",
+                "password": "pass",
+                "server_vip": "127.0.0.1",
+                "server_port": 1234,
+            },
+        )()
+
+        with patch("aplan.yinhe_sync._ensure_amazing_data_sdk", return_value=ErrorAmazingData):
+            with self.assertRaisesRegex(YinheUpstreamError, "历史快照无权限"):
+                fetch_amazing_data_snapshots(
+                    config,
+                    ["600000"],
+                    "20260706",
+                    timeout_seconds=0,
+                )
 
     def test_security_rows_normalize_to_security_schema(self) -> None:
         rows = [

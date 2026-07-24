@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import queue
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -686,29 +687,116 @@ def _ensure_amazing_data_sdk() -> Any:
     return ad
 
 
-def _flatten_amazing_data_result(snapshot_dict: Any) -> list[dict[str, Any]]:
+def _amazing_data_code_hint(value: Any) -> str | None:
+    text = str(value or "").strip()
+    cleaned = _strip_suffix(text)
+    return text if len(cleaned) == 6 and cleaned.isdigit() else None
+
+
+def _amazing_data_row(row: Any) -> dict[str, Any]:
+    if isinstance(row, Mapping):
+        return dict(row)
+    if hasattr(row, "_asdict"):
+        value = row._asdict()
+        if isinstance(value, Mapping):
+            return dict(value)
+    if hasattr(row, "__dict__"):
+        value = {
+            key: item
+            for key, item in vars(row).items()
+            if not str(key).startswith("_")
+        }
+        if value:
+            return value
+    raise YinheUpstreamError(
+        "AmazingData 快照行结构无法解析："
+        f"type={type(row).__name__}；请确认云端使用 AmazingData 1.1.7 兼容版适配器"
+    )
+
+
+def _looks_like_amazing_data_snapshot_row(value: Mapping[Any, Any]) -> bool:
+    fields = {str(key).strip().lower() for key in value}
+    return bool(
+        fields
+        & {
+            "code",
+            "security_code",
+            "symbol",
+            "证券代码",
+            "trade_time",
+            "交易时间",
+            "last",
+            "last_price",
+            "最新价",
+            "pre_close",
+            "昨收价",
+        }
+    )
+
+
+def _flatten_amazing_data_result(snapshot_result: Any) -> list[dict[str, Any]]:
+    # AmazingData 1.1.7 returns [data, errors], where data is commonly
+    # {trade_date: {code: DataFrame}}. Older releases returned {code: DataFrame}.
+    # Accept both shapes, but never silently ignore an upstream error list.
+    snapshot_dict = snapshot_result
+    if isinstance(snapshot_result, (list, tuple)) and len(snapshot_result) == 2:
+        candidate, errors = snapshot_result
+        if isinstance(candidate, Mapping):
+            if errors:
+                error_text = str(errors)
+                if len(error_text) > 500:
+                    error_text = f"{error_text[:497]}..."
+                raise YinheUpstreamError(f"AmazingData 历史快照返回错误：{error_text}")
+            snapshot_dict = candidate
+
     rows: list[dict[str, Any]] = []
-    if snapshot_dict is None:
-        return rows
-    if hasattr(snapshot_dict, "items"):
-        iterator = snapshot_dict.items()
-    else:
-        iterator = [(None, snapshot_dict)]
-    for code, value in iterator:
+    def visit(value: Any, code_hint: str | None = None) -> None:
         if value is None:
-            continue
-        if hasattr(value, "reset_index"):
+            return
+        if hasattr(value, "reset_index") and hasattr(value, "to_dict"):
             frame = value.reset_index()
             frame_rows = frame.to_dict(orient="records")
-        elif hasattr(value, "to_dict"):
-            frame_rows = value.to_dict(orient="records")
-        else:
-            frame_rows = _rows(value)
-        for row in frame_rows:
-            item = dict(row)
-            if code and not _first_value(item, "code", "security_code", "symbol", "证券代码"):
-                item["code"] = code
+            for row in frame_rows:
+                item = _amazing_data_row(row)
+                if code_hint and not _first_value(
+                    item, "code", "security_code", "symbol", "证券代码"
+                ):
+                    item["code"] = code_hint
+                rows.append(item)
+            return
+        if isinstance(value, Mapping) and _looks_like_amazing_data_snapshot_row(value):
+            item = dict(value)
+            if code_hint and not _first_value(
+                item, "code", "security_code", "symbol", "证券代码"
+            ):
+                item["code"] = code_hint
             rows.append(item)
+            return
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                visit(nested, _amazing_data_code_hint(key) or code_hint)
+            return
+        if isinstance(value, (list, tuple)):
+            for row in value:
+                visit(row, code_hint)
+            return
+        item = _amazing_data_row(value)
+        if code_hint and not _first_value(
+            item, "code", "security_code", "symbol", "证券代码"
+        ):
+            item["code"] = code_hint
+        rows.append(item)
+
+    visit(snapshot_dict)
+    if snapshot_dict is not None and not rows:
+        raise YinheUpstreamError(
+            "AmazingData 历史快照返回为空；请确认交易日、代码和历史快照权限"
+        )
+    for item in rows:
+        if not _first_value(item, "code", "security_code", "symbol", "证券代码"):
+            raise YinheUpstreamError(
+                "AmazingData 历史快照记录缺少证券代码，无法安全标准化"
+            )
     return rows
 
 
