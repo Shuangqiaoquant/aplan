@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from collections import defaultdict, deque
@@ -237,7 +238,32 @@ def render_report(records: list[dict[str, Any]], selected: int | None) -> str:
 
 
 def main() -> None:
-    project = Path(".").resolve()
+    parser = argparse.ArgumentParser(description="运行 APlan 多周期隔离验证")
+    parser.add_argument("--source", choices=["tushare", "yinhe"], default="tushare")
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--start", default="20230101")
+    parser.add_argument("--end", default="20260722")
+    parser.add_argument(
+        "--open-final-holdout",
+        action="store_true",
+        help="打开冻结协议中的最终留出集；默认不读取其绩效",
+    )
+    parser.add_argument("--output", help="报告输出目录")
+    args = parser.parse_args()
+    project = Path(args.root).resolve()
+    if args.source == "yinhe":
+        from .yinhe_price_baseline import run_yinhe_price_baseline
+
+        result = run_yinhe_price_baseline(
+            project,
+            start_date=args.start,
+            end_date=args.end,
+            open_final_holdout=args.open_final_holdout,
+            output_dir=Path(args.output).resolve() if args.output else None,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     raw = project / "data" / "raw" / "tushare"
     dates = snapshot_dates(raw)
     print("一次扫描生成全部周期信号...")

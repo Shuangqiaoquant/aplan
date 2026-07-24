@@ -219,6 +219,29 @@ AKSHARE_SYMBOLS_FILE=data/processed/candidates/latest_symbols.txt \
 bash scripts/cloud_backfill_data.sh
 ```
 
+## Provisional Yinhe Price Baseline
+
+After acceptance reports `raw_price_research_ready=true`, run the frozen
+multi-horizon baseline without opening the 2026 final holdout:
+
+```bash
+aplan-horizons \
+  --source yinhe \
+  --root . \
+  --start 20230101 \
+  --end 20260722
+```
+
+The runner uses only price and turnover features, applies the frozen transaction
+costs, and writes JSON, Markdown, and trade-level results under
+`reports/yinhe_price_baseline/`. It intentionally reports
+`provisional_raw_price_only` until forward adjustment, point-in-time security
+states, and official benchmarks pass acceptance.
+
+Do not add `--open-final-holdout` during model development. That option is
+reserved for the one-time final evaluation after the baseline definition and
+all strict-data checks are frozen.
+
 ## Cron Example
 
 Open crontab:
