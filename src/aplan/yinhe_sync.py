@@ -44,6 +44,10 @@ SECURITY_FIELDS = (
     "is_delisting_risk",
 )
 
+SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
+SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
+A_SHARE_PREFIXES = SHANGHAI_A_SHARE_PREFIXES + SHENZHEN_A_SHARE_PREFIXES
+
 SNAPSHOT_FIELDS = (
     "symbol",
     "trade_date",
@@ -354,6 +358,50 @@ def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return sorted(output, key=lambda item: item["symbol"])
+
+
+def build_symbol_pool(
+    root: Path,
+    *,
+    securities_path: Path | None = None,
+    output_path: Path | None = None,
+    include_st: bool = False,
+    include_delisting: bool = False,
+) -> dict[str, Any]:
+    source = securities_path or root / "data" / "processed" / "yinhe_securities.csv"
+    destination = output_path or root / "data" / "processed" / "yinhe_symbols.txt"
+    if not source.exists():
+        raise ValueError(f"未找到银河证券清单：{source}；请先运行 aplan-yinhe securities")
+
+    selected: list[str] = []
+    total_rows = 0
+    with source.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            total_rows += 1
+            symbol = _strip_suffix(row.get("symbol", ""))
+            if len(symbol) != 6 or not symbol.isdigit() or not symbol.startswith(A_SHARE_PREFIXES):
+                continue
+            if not include_st and str(row.get("is_st", "0")).strip().lower() in {"1", "true", "yes"}:
+                continue
+            if not include_delisting and str(row.get("is_delisting_risk", "0")).strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }:
+                continue
+            selected.append(symbol)
+
+    symbols = sorted(set(selected))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(f"{symbol}\n" for symbol in symbols), encoding="utf-8")
+    return {
+        "source_rows": total_rows,
+        "symbols": len(symbols),
+        "excluded_rows": total_rows - len(symbols),
+        "output_path": str(destination),
+        "include_st": include_st,
+        "include_delisting": include_delisting,
+    }
 
 
 def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[dict[str, Any]]:
@@ -1034,9 +1082,16 @@ def sync_snapshots_amazing_data(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="同步中国银河星耀数智数据")
-    parser.add_argument("command", choices=["securities", "daily", "backfill-daily", "snapshot", "snapshot-ad"])
+    parser.add_argument(
+        "command",
+        choices=["securities", "build-symbols", "daily", "backfill-daily", "snapshot", "snapshot-ad"],
+    )
     parser.add_argument("--root", default=".")
     parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--securities-file", help="银河证券清单 CSV；build-symbols 默认读取 data/processed/yinhe_securities.csv")
+    parser.add_argument("--output", help="build-symbols 输出文件；默认 data/processed/yinhe_symbols.txt")
+    parser.add_argument("--include-st", action="store_true", help="build-symbols 保留 ST 股票；默认排除")
+    parser.add_argument("--include-delisting", action="store_true", help="build-symbols 保留退市风险股票；默认排除")
     parser.add_argument("--start", help="开始日期，格式 YYYYMMDD；backfill-daily 需要")
     parser.add_argument("--end", help="结束日期，格式 YYYYMMDD；backfill-daily 需要")
     parser.add_argument("--date", help="交易日，格式 YYYYMMDD；daily/snapshot 需要")
@@ -1058,6 +1113,14 @@ def main() -> None:
     try:
         if args.command == "securities":
             result = sync_securities(root, as_of=args.as_of, config=YinheConfig.from_env(args.env_file))
+        elif args.command == "build-symbols":
+            result = build_symbol_pool(
+                root,
+                securities_path=Path(args.securities_file).resolve() if args.securities_file else None,
+                output_path=Path(args.output).resolve() if args.output else None,
+                include_st=args.include_st,
+                include_delisting=args.include_delisting,
+            )
         elif args.command == "daily":
             if not args.date:
                 raise SystemExit("daily 必须提供 --date YYYYMMDD")

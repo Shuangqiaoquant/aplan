@@ -176,6 +176,26 @@ Run the backfill job once per night while data is incomplete:
 10 2 * * 2-6 APLAN_ROOT=/home/ubuntu/APlan DAILY_MAX_DAYS=20 EVIDENCE_MAX_DAYS=1 /bin/bash /home/ubuntu/APlan/scripts/cloud_backfill_data.sh >> /home/ubuntu/APlan/logs/cron_backfill.log 2>&1
 ```
 
+When Yinhe daily data is enabled, first test one manual run:
+
+```bash
+cd /home/ubuntu/APlan
+source .venv/bin/activate
+bash scripts/cloud_yinhe_daily.sh
+```
+
+The script builds a Shanghai/Shenzhen A-share pool from `yinhe_securities.csv`, excludes ST and
+delisting-risk names, looks back 14 calendar days, and fills at most one missing weekday per run.
+After the manual run succeeds, schedule it after the market close:
+
+```cron
+45 17 * * 1-5 APLAN_ROOT=/home/ubuntu/APlan YINHE_MAX_DAYS=1 /bin/bash /home/ubuntu/APlan/scripts/cloud_yinhe_daily.sh >> /home/ubuntu/APlan/logs/cron_yinhe.log 2>&1
+```
+
+Set `YINHE_REFRESH_SECURITIES=1` for an occasional manual run to refresh the security list. Files
+created earlier with only sample symbols should be rebuilt once with `backfill-daily --overwrite`
+before treating them as full-market history.
+
 ## Emergency Rule
 
 If you must hotfix on the cloud:

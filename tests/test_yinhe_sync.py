@@ -8,6 +8,7 @@ import unittest
 
 from aplan.yinhe_sync import (
     backfill_daily,
+    build_symbol_pool,
     build_kline_request,
     build_security_info_request,
     build_snapshot_request,
@@ -150,6 +151,54 @@ class YinheSyncTests(unittest.TestCase):
         self.assertEqual(values[0]["is_st"], "1")
         self.assertEqual(values[1]["list_date"], "2010-01-01")
         self.assertEqual(values[2]["industry"], "银行")
+
+    def test_build_symbol_pool_keeps_regular_shanghai_and_shenzhen_a_shares(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            securities = root / "data" / "processed" / "yinhe_securities.csv"
+            securities.parent.mkdir(parents=True)
+            securities.write_text(
+                "symbol,name,list_date,industry,is_st,is_delisting_risk\n"
+                "600000,浦发银行,1999-11-10,银行,0,0\n"
+                "000001,平安银行,1991-04-03,银行,0,0\n"
+                "300001,特锐德,2009-10-30,电力设备,0,0\n"
+                "688001,华兴源创,2019-07-22,机械,0,0\n"
+                "600001,*ST测试,2000-01-01,未知,1,0\n"
+                "000002,退市测试,2000-01-01,未知,0,1\n"
+                "510300,沪深300ETF,2012-05-28,基金,0,0\n"
+                "110000,测试转债,2020-01-01,债券,0,0\n",
+                encoding="utf-8",
+            )
+
+            result = build_symbol_pool(root)
+            output = root / "data" / "processed" / "yinhe_symbols.txt"
+
+            self.assertEqual(result["source_rows"], 8)
+            self.assertEqual(result["symbols"], 4)
+            self.assertEqual(
+                output.read_text(encoding="utf-8").splitlines(),
+                ["000001", "300001", "600000", "688001"],
+            )
+
+    def test_build_symbol_pool_can_include_risk_names(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            securities = root / "securities.csv"
+            securities.write_text(
+                "symbol,name,list_date,industry,is_st,is_delisting_risk\n"
+                "600001,*ST测试,2000-01-01,未知,1,0\n"
+                "000002,退市测试,2000-01-01,未知,0,1\n",
+                encoding="utf-8",
+            )
+
+            result = build_symbol_pool(
+                root,
+                securities_path=securities,
+                include_st=True,
+                include_delisting=True,
+            )
+
+            self.assertEqual(result["symbols"], 2)
 
     def test_daily_rows_normalize_to_daily_schema(self) -> None:
         rows = [
