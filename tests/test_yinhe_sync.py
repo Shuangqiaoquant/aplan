@@ -400,6 +400,47 @@ class YinheSyncTests(unittest.TestCase):
         self.assertEqual(first_request.end_date, 20260722)
         self.assertEqual(len(rows), 3)
 
+    def test_fetch_daily_range_retries_timeout(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with (
+            patch.object(
+                client,
+                "query_kline",
+                side_effect=[
+                    YinheUpstreamError("银河 K 线查询失败：获取数据超时"),
+                    [{"证券代码": "600000", "kline_time": 20260722000000000}],
+                ],
+            ) as query,
+            patch("aplan.yinhe_sync.time.sleep") as sleep,
+        ):
+            rows = client.fetch_daily_range(
+                ["600000"],
+                "20260701",
+                "20260722",
+                retries=3,
+                retry_delay_seconds=5,
+            )
+
+        self.assertEqual(query.call_count, 2)
+        sleep.assert_called_once_with(5)
+        self.assertEqual(len(rows), 1)
+
+    def test_fetch_daily_range_does_not_retry_permission_error(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with patch.object(
+            client,
+            "query_kline",
+            side_effect=YinheUpstreamError("银河 K 线查询失败：数据无权限"),
+        ) as query:
+            with self.assertRaisesRegex(YinheUpstreamError, "数据无权限"):
+                client.fetch_daily_range(["600000"], "20260701", "20260722")
+
+        self.assertEqual(query.call_count, 1)
+
     def test_snapshot_rows_normalize_to_snapshot_schema(self) -> None:
         rows = [
             {

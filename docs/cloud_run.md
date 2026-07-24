@@ -154,6 +154,8 @@ chunk is merged into the per-date CSV files and recorded below
 `data/raw/yinhe/ranges/`. Re-running the same command resumes from those checkpoints.
 Use a smaller `--chunk-size` on a low-memory server. Do not pass `--overwrite` when
 resuming, because it intentionally ignores checkpoints and re-queries every chunk.
+Transient supplier timeouts are retried three times by default with increasing waits.
+Tune this with `--query-retries` and `--retry-delay` when the upstream service is unstable.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

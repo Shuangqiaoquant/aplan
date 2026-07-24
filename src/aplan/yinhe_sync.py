@@ -8,6 +8,7 @@ import math
 import multiprocessing
 import os
 import queue
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -920,7 +921,13 @@ class YinheClient:
         end_date: str,
         *,
         interval: str | int = "day",
+        retries: int = 3,
+        retry_delay_seconds: float = 5.0,
     ) -> list[dict[str, Any]]:
+        if retries < 0:
+            raise ValueError("retries 不能小于 0")
+        if retry_delay_seconds < 0:
+            raise ValueError("retry_delay_seconds 不能小于 0")
         tgw = self._sdk()
         rows: list[dict[str, Any]] = []
         empty_count = 0
@@ -934,12 +941,27 @@ class YinheClient:
                 end_date=end_date,
                 interval=interval,
             )
-            try:
-                symbol_rows = self.query_kline(request)
-            except YinheUpstreamError as exc:
-                if "数据为空" not in str(exc):
-                    raise
-                symbol_rows = []
+            attempt = 0
+            while True:
+                try:
+                    symbol_rows = self.query_kline(request)
+                    break
+                except YinheUpstreamError as exc:
+                    message = str(exc)
+                    if "数据为空" in message:
+                        symbol_rows = []
+                        break
+                    retryable = "超时" in message or "timeout" in message.lower()
+                    if not retryable or attempt >= retries:
+                        raise
+                    attempt += 1
+                    wait_seconds = retry_delay_seconds * attempt
+                    print(
+                        f"银河 K 线查询超时：symbol={symbol}，"
+                        f"重试={attempt}/{retries}，等待={wait_seconds:g}秒"
+                    )
+                    if wait_seconds > 0:
+                        time.sleep(wait_seconds)
             if symbol_rows:
                 successful_count += 1
                 rows.extend(symbol_rows)
@@ -1171,6 +1193,8 @@ def backfill_daily_range(
     config: YinheConfig | None = None,
     interval: str | int = "day",
     chunk_size: int = 250,
+    query_retries: int = 3,
+    retry_delay_seconds: float = 5.0,
     overwrite: bool = False,
     fetcher: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -1287,6 +1311,8 @@ def backfill_daily_range(
                         start_key,
                         end_key,
                         interval=interval,
+                        retries=query_retries,
+                        retry_delay_seconds=retry_delay_seconds,
                     )
                 metadata = merge_chunk(rows, chunk_symbols, chunk_index)
                 query_count += len(chunk_symbols)
@@ -1492,6 +1518,8 @@ def main() -> None:
     parser.add_argument("--interval", default="day", help="K线周期，默认 day；可用 1m/5m/day/week/month 等")
     parser.add_argument("--max-days", type=int, help="backfill-daily 本批最多处理多少个工作日")
     parser.add_argument("--chunk-size", type=int, default=250, help="backfill-range 每块股票数量，默认 250")
+    parser.add_argument("--query-retries", type=int, default=3, help="backfill-range 查询超时后的重试次数，默认 3")
+    parser.add_argument("--retry-delay", type=float, default=5.0, help="backfill-range 重试基础等待秒数，默认 5")
     parser.add_argument("--delay", type=float, default=0.0, help="backfill-daily 每个日期之间等待秒数，默认 0")
     parser.add_argument(
         "--overwrite",
@@ -1561,6 +1589,8 @@ def main() -> None:
                 config=YinheConfig.from_env(args.env_file),
                 interval=args.interval,
                 chunk_size=args.chunk_size,
+                query_retries=args.query_retries,
+                retry_delay_seconds=args.retry_delay,
                 overwrite=args.overwrite,
             )
         elif args.command == "audit-daily":
