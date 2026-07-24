@@ -404,6 +404,60 @@ def build_symbol_pool(
     }
 
 
+def _daily_coverage(
+    root: Path,
+    trade_date: str,
+    symbols: list[str],
+    daily: list[dict[str, Any]],
+) -> dict[str, Any]:
+    requested = sorted(set(symbols))
+    observed = {
+        _strip_suffix(row.get("symbol", ""))
+        for row in daily
+        if len(_strip_suffix(row.get("symbol", ""))) == 6
+    }
+    missing = [symbol for symbol in requested if symbol not in observed]
+    missing_path = root / "data" / "processed" / "yinhe_daily_missing" / f"{trade_date}.txt"
+    missing_path.parent.mkdir(parents=True, exist_ok=True)
+    missing_path.write_text("".join(f"{symbol}\n" for symbol in missing), encoding="utf-8")
+
+    requested_by_prefix: dict[str, int] = {}
+    missing_by_prefix: dict[str, int] = {}
+    for symbol in requested:
+        prefix = symbol[:3]
+        requested_by_prefix[prefix] = requested_by_prefix.get(prefix, 0) + 1
+    for symbol in missing:
+        prefix = symbol[:3]
+        missing_by_prefix[prefix] = missing_by_prefix.get(prefix, 0) + 1
+
+    requested_count = len(requested)
+    observed_count = len(set(requested) & observed)
+    return {
+        "requested_symbols": requested_count,
+        "observed_symbols": observed_count,
+        "missing_symbols": len(missing),
+        "coverage_rate": round(observed_count / requested_count, 6) if requested_count else 0.0,
+        "missing_path": str(missing_path),
+        "requested_by_prefix": requested_by_prefix,
+        "missing_by_prefix": missing_by_prefix,
+    }
+
+
+def audit_daily_coverage(root: Path, trade_date: str, symbols: list[str]) -> dict[str, Any]:
+    daily_path = root / "data" / "processed" / "yinhe_daily" / f"{trade_date}.csv"
+    if not daily_path.exists():
+        raise ValueError(f"未找到银河日线文件：{daily_path}")
+    with daily_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        daily = list(csv.DictReader(handle))
+    result = {
+        "trade_date": trade_date,
+        "daily_rows": len(daily),
+        "daily_path": str(daily_path),
+    }
+    result.update(_daily_coverage(root, trade_date, symbols, daily))
+    return result
+
+
 def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for row in rows:
@@ -752,7 +806,10 @@ class YinheClient:
     ) -> list[dict[str, Any]]:
         tgw = self._sdk()
         rows: list[dict[str, Any]] = []
-        for symbol in symbols:
+        empty_count = 0
+        successful_count = 0
+        total = len(symbols)
+        for index, symbol in enumerate(symbols, 1):
             request = build_kline_request(
                 tgw,
                 symbol,
@@ -760,12 +817,26 @@ class YinheClient:
                 end_date=trade_date,
                 interval=interval,
             )
+            empty_error = False
             try:
-                rows.extend(self.query_kline(request))
+                symbol_rows = self.query_kline(request)
             except YinheUpstreamError as exc:
                 if "数据为空" in str(exc):
-                    continue
-                raise
+                    empty_error = True
+                    empty_count += 1
+                    symbol_rows = []
+                else:
+                    raise
+            if symbol_rows:
+                successful_count += 1
+                rows.extend(symbol_rows)
+            elif not empty_error:
+                empty_count += 1
+            if total >= 100 and (index % 500 == 0 or index == total):
+                print(
+                    f"银河日线查询进度：{index}/{total}，"
+                    f"有数据={successful_count}，空数据={empty_count}"
+                )
         return rows
 
     def fetch_snapshots(
@@ -861,12 +932,15 @@ def sync_daily(
     )
     processed_path = root / "data" / "processed" / "yinhe_daily" / f"{trade_date}.csv"
     _write_csv(processed_path, daily, DAILY_FIELDS)
-    return {
+    result = {
         "trade_date": trade_date,
         "raw_rows": len(rows),
         "daily_rows": len(daily),
         "processed_path": str(processed_path),
     }
+    if symbols:
+        result.update(_daily_coverage(root, trade_date, symbols, daily))
+    return result
 
 
 def backfill_daily(
@@ -912,12 +986,14 @@ def backfill_daily(
         )
         processed_path = root / "data" / "processed" / "yinhe_daily" / f"{day}.csv"
         _write_csv(processed_path, daily, DAILY_FIELDS)
-        return {
+        result = {
             "trade_date": day,
             "raw_rows": len(rows),
             "daily_rows": len(daily),
             "processed_path": str(processed_path),
         }
+        result.update(_daily_coverage(root, day, symbols, daily))
+        return result
 
     if fetcher:
         for index, day in enumerate(pending, 1):
@@ -928,7 +1004,10 @@ def backfill_daily(
                 print(f"[{index}/{len(pending)}] {day}：failed={exc}")
                 break
             summary["completed"] += 1
-            print(f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}")
+            print(
+                f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}，"
+                f"coverage={result['coverage_rate']:.2%}"
+            )
             if delay_seconds > 0:
                 import time
 
@@ -948,7 +1027,12 @@ def backfill_daily(
                 print(f"[{index}/{len(pending)}] {day}：failed={exc}")
                 break
             summary["completed"] += 1
-            print(f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}")
+            summary["last_coverage_rate"] = result["coverage_rate"]
+            summary["last_missing_symbols"] = result["missing_symbols"]
+            print(
+                f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}，"
+                f"coverage={result['coverage_rate']:.2%}"
+            )
             if delay_seconds > 0:
                 import time
 
@@ -1089,7 +1173,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="同步中国银河星耀数智数据")
     parser.add_argument(
         "command",
-        choices=["securities", "build-symbols", "daily", "backfill-daily", "snapshot", "snapshot-ad"],
+        choices=[
+            "securities",
+            "build-symbols",
+            "daily",
+            "backfill-daily",
+            "audit-daily",
+            "snapshot",
+            "snapshot-ad",
+        ],
     )
     parser.add_argument("--root", default=".")
     parser.add_argument("--env-file", default=".env")
@@ -1156,6 +1248,13 @@ def main() -> None:
                 delay_seconds=args.delay,
                 overwrite=args.overwrite,
             )
+        elif args.command == "audit-daily":
+            if not args.date:
+                raise SystemExit("audit-daily 必须提供 --date YYYYMMDD")
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit("audit-daily 必须通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
+            result = audit_daily_coverage(root, args.date, symbols)
         elif args.command == "snapshot":
             if not args.date:
                 raise SystemExit("snapshot 必须提供 --date YYYYMMDD")

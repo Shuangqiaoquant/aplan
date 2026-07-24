@@ -7,6 +7,7 @@ from unittest.mock import patch
 import unittest
 
 from aplan.yinhe_sync import (
+    audit_daily_coverage,
     backfill_daily,
     build_symbol_pool,
     build_kline_request,
@@ -225,6 +226,35 @@ class YinheSyncTests(unittest.TestCase):
         self.assertAlmostEqual(values[0]["open"], 10.1)
         self.assertAlmostEqual(values[0]["turnover"], 12345678.0)
         self.assertEqual(values[0]["is_suspended"], "0")
+
+    def test_audit_daily_coverage_writes_missing_symbols_and_prefix_counts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            daily = root / "data" / "processed" / "yinhe_daily" / "20260722.csv"
+            daily.parent.mkdir(parents=True)
+            daily.write_text(
+                "symbol,trade_date,close\n"
+                "000001,20260722,10\n"
+                "600000,20260722,11\n",
+                encoding="utf-8",
+            )
+
+            result = audit_daily_coverage(
+                root,
+                "20260722",
+                ["000001", "300001", "600000", "688001"],
+            )
+
+            self.assertEqual(result["observed_symbols"], 2)
+            self.assertEqual(result["missing_symbols"], 2)
+            self.assertEqual(result["coverage_rate"], 0.5)
+            self.assertEqual(result["missing_by_prefix"], {"300": 1, "688": 1})
+            self.assertEqual(
+                (root / "data" / "processed" / "yinhe_daily_missing" / "20260722.txt")
+                .read_text(encoding="utf-8")
+                .splitlines(),
+                ["300001", "688001"],
+            )
 
     def test_fetch_daily_skips_symbols_with_empty_data(self) -> None:
         config = type("Config", (), {})()
