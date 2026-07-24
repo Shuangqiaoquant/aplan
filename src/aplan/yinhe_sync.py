@@ -521,14 +521,16 @@ def audit_daily_coverage(root: Path, trade_date: str, symbols: list[str]) -> dic
 
 def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
+    fallback_date = _date_key(trade_date)
     for row in rows:
         symbol = _strip_suffix(_first_value(row, "证券代码", "security_code", "symbol", "code"))
         if len(symbol) != 6 or not symbol.isdigit():
             continue
+        row_date = _date_key(_first_value(row, "交易日期", "trade_date", "date")) or fallback_date
         output.append(
             {
                 "symbol": symbol,
-                "trade_date": str(_first_value(row, "交易日期", "trade_date", "date") or trade_date).replace("-", ""),
+                "trade_date": row_date,
                 "open": _number(_first_value(row, "开盘价", "open", "open_price")),
                 "high": _number(_first_value(row, "最高价", "high", "high_price")),
                 "low": _number(_first_value(row, "最低价", "low", "low_price")),
@@ -547,7 +549,7 @@ def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[di
                 else "0",
             }
         )
-    return sorted(output, key=lambda item: item["symbol"])
+    return sorted(output, key=lambda item: (item["trade_date"], item["symbol"]))
 
 
 def normalize_snapshot_rows(rows: list[dict[str, Any]], trade_date: str) -> list[dict[str, Any]]:
@@ -900,6 +902,45 @@ class YinheClient:
                 )
         return rows
 
+    def fetch_daily_range(
+        self,
+        symbols: list[str],
+        start_date: str,
+        end_date: str,
+        *,
+        interval: str | int = "day",
+    ) -> list[dict[str, Any]]:
+        tgw = self._sdk()
+        rows: list[dict[str, Any]] = []
+        empty_count = 0
+        successful_count = 0
+        total = len(symbols)
+        for index, symbol in enumerate(symbols, 1):
+            request = build_kline_request(
+                tgw,
+                symbol,
+                begin_date=start_date,
+                end_date=end_date,
+                interval=interval,
+            )
+            try:
+                symbol_rows = self.query_kline(request)
+            except YinheUpstreamError as exc:
+                if "数据为空" not in str(exc):
+                    raise
+                symbol_rows = []
+            if symbol_rows:
+                successful_count += 1
+                rows.extend(symbol_rows)
+            else:
+                empty_count += 1
+            if total >= 100 and (index % 500 == 0 or index == total):
+                print(
+                    f"银河区间日线查询进度：{index}/{total}，"
+                    f"有数据={successful_count}，空数据={empty_count}，累计K线={len(rows)}"
+                )
+        return rows
+
     def fetch_snapshots(
         self,
         symbols: list[str],
@@ -1110,6 +1151,90 @@ def backfill_daily(
     return summary
 
 
+def backfill_daily_range(
+    root: Path,
+    start_date: str,
+    end_date: str,
+    *,
+    symbols: list[str],
+    config: YinheConfig | None = None,
+    interval: str | int = "day",
+    overwrite: bool = False,
+    fetcher: Callable[[], list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    if not symbols:
+        raise ValueError("请通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
+    start_key = _date_key(start_date)
+    end_key = _date_key(end_date)
+    if not start_key or not end_key or start_key > end_key:
+        raise ValueError("开始和结束日期必须有效，且开始日期不能晚于结束日期")
+
+    rows = (
+        fetcher()
+        if fetcher
+        else _with_logged_in_client(
+            config or YinheConfig.from_env(),
+            lambda client: client.fetch_daily_range(
+                symbols,
+                start_key,
+                end_key,
+                interval=interval,
+            ),
+        )
+    )
+    daily = [
+        row
+        for row in normalize_daily_rows(rows, end_key)
+        if start_key <= row["trade_date"] <= end_key
+    ]
+    daily_by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in daily:
+        daily_by_date.setdefault(row["trade_date"], []).append(row)
+
+    raw_by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        day = _date_key(_first_value(row, "交易日期", "trade_date", "date"))
+        if start_key <= day <= end_key:
+            raw_by_date.setdefault(day, []).append(row)
+
+    written_dates: list[str] = []
+    skipped_dates: list[str] = []
+    coverage_by_date: dict[str, float] = {}
+    missing_by_date: dict[str, int] = {}
+    for day in sorted(daily_by_date):
+        processed_path = root / "data" / "processed" / "yinhe_daily" / f"{day}.csv"
+        if processed_path.exists() and not overwrite:
+            skipped_dates.append(day)
+            continue
+        day_rows = daily_by_date[day]
+        _write_snapshot(
+            root / "data" / "raw" / "yinhe" / day / "daily.json",
+            "QueryKlineRange",
+            raw_by_date.get(day, []),
+        )
+        _write_csv(processed_path, day_rows, DAILY_FIELDS)
+        coverage = _daily_coverage(root, day, symbols, day_rows)
+        written_dates.append(day)
+        coverage_by_date[day] = coverage["coverage_rate"]
+        missing_by_date[day] = coverage["missing_symbols"]
+
+    return {
+        "start_date": start_key,
+        "end_date": end_key,
+        "symbols": len(symbols),
+        "query_count": len(symbols),
+        "raw_rows": len(rows),
+        "daily_rows": len(daily),
+        "returned_dates": len(daily_by_date),
+        "written_dates": len(written_dates),
+        "skipped_existing_dates": len(skipped_dates),
+        "first_returned_date": min(daily_by_date, default=None),
+        "last_returned_date": max(daily_by_date, default=None),
+        "coverage_by_date": coverage_by_date,
+        "missing_by_date": missing_by_date,
+    }
+
+
 def sync_snapshots(
     root: Path,
     trade_date: str,
@@ -1246,6 +1371,7 @@ def main() -> None:
             "build-symbols",
             "daily",
             "backfill-daily",
+            "backfill-range",
             "audit-daily",
             "snapshot",
             "snapshot-ad",
@@ -1257,8 +1383,8 @@ def main() -> None:
     parser.add_argument("--output", help="build-symbols 输出文件；默认 data/processed/yinhe_symbols.txt")
     parser.add_argument("--include-st", action="store_true", help="build-symbols 保留 ST 股票；默认排除")
     parser.add_argument("--include-delisting", action="store_true", help="build-symbols 保留退市风险股票；默认排除")
-    parser.add_argument("--start", help="开始日期，格式 YYYYMMDD；backfill-daily 需要")
-    parser.add_argument("--end", help="结束日期，格式 YYYYMMDD；backfill-daily 需要")
+    parser.add_argument("--start", help="开始日期，格式 YYYYMMDD；backfill-daily/backfill-range 需要")
+    parser.add_argument("--end", help="结束日期，格式 YYYYMMDD；backfill-daily/backfill-range 需要")
     parser.add_argument("--date", help="交易日，格式 YYYYMMDD；daily/snapshot 需要")
     parser.add_argument("--as-of", help="观察日期，格式 YYYY-MM-DD；仅 securities 需要")
     parser.add_argument("--symbols", help="逗号分隔六位股票代码；daily/snapshot 需要")
@@ -1314,6 +1440,21 @@ def main() -> None:
                 interval=args.interval,
                 max_days=args.max_days,
                 delay_seconds=args.delay,
+                overwrite=args.overwrite,
+            )
+        elif args.command == "backfill-range":
+            if not args.start or not args.end:
+                raise SystemExit("backfill-range 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit("backfill-range 必须通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
+            result = backfill_daily_range(
+                root,
+                args.start,
+                args.end,
+                symbols=symbols,
+                config=YinheConfig.from_env(args.env_file),
+                interval=args.interval,
                 overwrite=args.overwrite,
             )
         elif args.command == "audit-daily":

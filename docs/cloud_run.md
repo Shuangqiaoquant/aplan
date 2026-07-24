@@ -128,6 +128,26 @@ The script runs these stages:
   defaults to `65` seconds for accounts limited to about once per minute.
 - Tushare `daily_basic,stk_limit,suspend_d` for up to `EVIDENCE_MAX_DAYS` local daily dates.
 - AkShare securities and spot valuations for the end date.
+
+## Yinhe Historical Range Bootstrap
+
+`backfill-daily` queries the whole symbol pool once for every date. Use it for the normal
+daily update. For an initial historical window, `backfill-range` is more efficient: it
+queries each symbol once for the whole range, then splits returned K-lines into the same
+per-date processed files.
+
+Always validate the supplier response with a small symbol sample first:
+
+```bash
+aplan-yinhe backfill-range \
+  --start 20260601 \
+  --end 20260722 \
+  --symbols 600000,000001,600519,300750,000333
+```
+
+Check that `returned_dates`, `daily_rows`, and the generated CSV files are reasonable
+before expanding the symbol list. Existing date files are preserved unless `--overwrite`
+is passed.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

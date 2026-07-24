@@ -9,6 +9,7 @@ import unittest
 from aplan.yinhe_sync import (
     audit_daily_coverage,
     backfill_daily,
+    backfill_daily_range,
     build_symbol_pool,
     build_kline_request,
     build_security_info_request,
@@ -343,6 +344,33 @@ class YinheSyncTests(unittest.TestCase):
             with self.assertRaisesRegex(YinheUpstreamError, "数据无权限"):
                 client.fetch_daily(["600000"], "20260722")
 
+    def test_fetch_daily_range_uses_one_request_per_symbol(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with patch.object(
+            client,
+            "query_kline",
+            side_effect=[
+                [
+                    {"证券代码": "600000", "交易日期": "20260721"},
+                    {"证券代码": "600000", "交易日期": "20260722"},
+                ],
+                [{"证券代码": "000001", "交易日期": "20260722"}],
+            ],
+        ) as query:
+            rows = client.fetch_daily_range(
+                ["600000", "000001"],
+                "20260701",
+                "20260722",
+            )
+
+        self.assertEqual(query.call_count, 2)
+        first_request = query.call_args_list[0].args[0]
+        self.assertEqual(first_request.begin_date, 20260701)
+        self.assertEqual(first_request.end_date, 20260722)
+        self.assertEqual(len(rows), 3)
+
     def test_snapshot_rows_normalize_to_snapshot_schema(self) -> None:
         rows = [
             {
@@ -444,6 +472,48 @@ class YinheSyncTests(unittest.TestCase):
             self.assertEqual(result["completed"], 2)
             self.assertTrue((root / "data" / "processed" / "yinhe_daily" / "20260702.csv").exists())
             self.assertTrue((root / "data" / "raw" / "yinhe" / "20260703" / "daily.json").exists())
+
+    def test_backfill_daily_range_splits_rows_by_trade_date(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = backfill_daily_range(
+                root,
+                "20260701",
+                "20260703",
+                symbols=["600000", "000001"],
+                fetcher=lambda: [
+                    {
+                        "证券代码": "600000",
+                        "交易日期": "20260701",
+                        "开盘价": "10",
+                        "收盘价": "11",
+                    },
+                    {
+                        "证券代码": "000001",
+                        "交易日期": "20260701",
+                        "开盘价": "12",
+                        "收盘价": "13",
+                    },
+                    {
+                        "证券代码": "600000",
+                        "交易日期": "20260702",
+                        "开盘价": "11",
+                        "收盘价": "12",
+                    },
+                ],
+            )
+
+            self.assertEqual(result["query_count"], 2)
+            self.assertEqual(result["returned_dates"], 2)
+            self.assertEqual(result["written_dates"], 2)
+            self.assertEqual(result["coverage_by_date"]["20260701"], 1.0)
+            self.assertEqual(result["coverage_by_date"]["20260702"], 0.5)
+            self.assertTrue(
+                (root / "data" / "processed" / "yinhe_daily" / "20260701.csv").exists()
+            )
+            self.assertTrue(
+                (root / "data" / "raw" / "yinhe" / "20260702" / "daily.json").exists()
+            )
 
 
 if __name__ == "__main__":
