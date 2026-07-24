@@ -50,6 +50,7 @@ SECURITY_FIELDS = (
 SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
 SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
 A_SHARE_PREFIXES = SHANGHAI_A_SHARE_PREFIXES + SHENZHEN_A_SHARE_PREFIXES
+A_SHARE_SECURITY_TYPES = {"02001", "02003", "02004", "02009"}
 
 SNAPSHOT_FIELDS = (
     "symbol",
@@ -331,8 +332,7 @@ def _observed_at(as_of: str | None) -> datetime:
 
 
 def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    output: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    selected: dict[str, dict[str, Any]] = {}
     for row in rows:
         symbol = _strip_suffix(
             _first_value(
@@ -344,32 +344,36 @@ def normalize_security_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "symbol",
             )
         )
-        if len(symbol) != 6 or not symbol.isdigit() or symbol in seen:
+        if len(symbol) != 6 or not symbol.isdigit():
             continue
         name = str(
             _first_value(row, "证券简称", "A股简称", "name", "security_name", "symbol") or ""
         ).strip()
         if not name:
             continue
-        seen.add(symbol)
-        output.append(
-            {
-                "symbol": symbol,
-                "name": name,
-                "list_date": _parse_date(_first_value(row, "上市日期", "A股上市日期", "list_date")),
-                "industry": str(_first_value(row, "所属行业", "industry") or "未知").strip() or "未知",
-                "is_st": "1" if "ST" in name.upper() else "0",
-                "is_delisting_risk": "1" if "退" in name else "0",
-                "market": str(_first_value(row, "_query_market", "market_type", "market") or "").strip(),
-                "security_type": str(
-                    _first_value(row, "证券类型", "security_type", "securityType") or ""
-                ).strip(),
-                "security_status": str(
-                    _first_value(row, "证券状态", "security_status", "securityStatus") or ""
-                ).strip(),
-            }
-        )
-    return sorted(output, key=lambda item: item["symbol"])
+        market = str(_first_value(row, "_query_market", "market_type", "market") or "").strip()
+        item = {
+            "symbol": symbol,
+            "name": name,
+            "list_date": _parse_date(_first_value(row, "上市日期", "A股上市日期", "list_date")),
+            "industry": str(_first_value(row, "所属行业", "industry") or "未知").strip() or "未知",
+            "is_st": "1" if "ST" in name.upper() else "0",
+            "is_delisting_risk": "1" if "退" in name else "0",
+            "market": market,
+            "security_type": str(
+                _first_value(row, "证券类型", "security_type", "securityType") or ""
+            ).strip(),
+            "security_status": str(
+                _first_value(row, "证券状态", "security_status", "securityStatus") or ""
+            ).strip(),
+        }
+        previous = selected.get(symbol)
+        expected_market = _infer_market(symbol)
+        if previous is None or (
+            market == expected_market and previous.get("market") != expected_market
+        ):
+            selected[symbol] = item
+    return sorted(selected.values(), key=lambda item: item["symbol"])
 
 
 def build_symbol_pool(
@@ -388,10 +392,15 @@ def build_symbol_pool(
     selected: list[str] = []
     total_rows = 0
     with source.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames or "security_type" not in reader.fieldnames:
+            raise ValueError("银河证券清单缺少 security_type；请先重新运行 aplan-yinhe securities")
+        for row in reader:
             total_rows += 1
             symbol = _strip_suffix(row.get("symbol", ""))
             if len(symbol) != 6 or not symbol.isdigit() or not symbol.startswith(A_SHARE_PREFIXES):
+                continue
+            if str(row.get("security_type", "")).strip() not in A_SHARE_SECURITY_TYPES:
                 continue
             if not include_st and str(row.get("is_st", "0")).strip().lower() in {"1", "true", "yes"}:
                 continue

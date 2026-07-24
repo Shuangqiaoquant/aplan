@@ -154,12 +154,19 @@ class YinheSyncTests(unittest.TestCase):
             },
             {"A股代码": "000001.SZ", "A股简称": "*ST测试", "A股上市日期": "1991-04-03"},
             {"code": "300001", "name": "创业测试", "list_date": "2010/01/01"},
+            {
+                "security_code": "000001",
+                "symbol": "上证指数",
+                "_query_market": "sse",
+                "security_type": "01000",
+            },
         ]
 
         values = normalize_security_rows(rows)
 
         self.assertEqual([item["symbol"] for item in values], ["000001", "300001", "600000"])
         self.assertEqual(values[0]["is_st"], "1")
+        self.assertEqual(values[0]["name"], "*ST测试")
         self.assertEqual(values[1]["list_date"], "2010-01-01")
         self.assertEqual(values[2]["industry"], "银行")
         self.assertEqual(values[2]["market"], "sse")
@@ -190,15 +197,15 @@ class YinheSyncTests(unittest.TestCase):
             securities = root / "data" / "processed" / "yinhe_securities.csv"
             securities.parent.mkdir(parents=True)
             securities.write_text(
-                "symbol,name,list_date,industry,is_st,is_delisting_risk\n"
-                "600000,浦发银行,1999-11-10,银行,0,0\n"
-                "000001,平安银行,1991-04-03,银行,0,0\n"
-                "300001,特锐德,2009-10-30,电力设备,0,0\n"
-                "688001,华兴源创,2019-07-22,机械,0,0\n"
-                "600001,*ST测试,2000-01-01,未知,1,0\n"
-                "000002,退市测试,2000-01-01,未知,0,1\n"
-                "510300,沪深300ETF,2012-05-28,基金,0,0\n"
-                "110000,测试转债,2020-01-01,债券,0,0\n",
+                "symbol,name,list_date,industry,is_st,is_delisting_risk,market,security_type,security_status\n"
+                "600000,浦发银行,1999-11-10,银行,0,0,sse,02001,\n"
+                "000001,平安银行,1991-04-03,银行,0,0,szse,02001,\n"
+                "300001,特锐德,2009-10-30,电力设备,0,0,szse,02003,\n"
+                "688001,华兴源创,2019-07-22,机械,0,0,sse,02004,\n"
+                "600001,*ST测试,2000-01-01,未知,1,0,sse,02001,\n"
+                "000002,退市测试,2000-01-01,未知,0,1,szse,02001,\n"
+                "510300,沪深300ETF,2012-05-28,基金,0,0,sse,03001,\n"
+                "110000,测试转债,2020-01-01,债券,0,0,sse,04001,\n",
                 encoding="utf-8",
             )
 
@@ -217,9 +224,9 @@ class YinheSyncTests(unittest.TestCase):
             root = Path(tmp)
             securities = root / "securities.csv"
             securities.write_text(
-                "symbol,name,list_date,industry,is_st,is_delisting_risk\n"
-                "600001,*ST测试,2000-01-01,未知,1,0\n"
-                "000002,退市测试,2000-01-01,未知,0,1\n",
+                "symbol,name,list_date,industry,is_st,is_delisting_risk,market,security_type,security_status\n"
+                "600001,*ST测试,2000-01-01,未知,1,0,sse,02001,\n"
+                "000002,退市测试,2000-01-01,未知,0,1,szse,02001,\n",
                 encoding="utf-8",
             )
 
