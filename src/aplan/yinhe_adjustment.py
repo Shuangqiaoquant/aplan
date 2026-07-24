@@ -23,6 +23,9 @@ DAILY_FIELDS = (
     "is_limit_up",
     "is_limit_down",
 )
+CONTINUITY_THRESHOLD = 0.205
+MAX_QUARANTINE_RATIO = 0.001
+MAX_QUARANTINE_SYMBOLS = 5
 
 
 def _date_key(value: Any) -> str:
@@ -250,6 +253,31 @@ def _float(value: Any) -> float:
         return 0.0
 
 
+def _quarantine_allowed(issue_symbols: set[str], total_symbols: int) -> bool:
+    return bool(
+        issue_symbols
+        and total_symbols > 0
+        and len(issue_symbols) <= MAX_QUARANTINE_SYMBOLS
+        and len(issue_symbols) / total_symbols <= MAX_QUARANTINE_RATIO
+    )
+
+
+def _remove_quarantined_symbols(paths: list[Path], symbols: set[str]) -> int:
+    removed = 0
+    for path in paths:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        kept = [row for row in rows if _symbol_key(row.get("symbol")) not in symbols]
+        removed += len(rows) - len(kept)
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=DAILY_FIELDS)
+            writer.writeheader()
+            writer.writerows(kept)
+        temporary.replace(path)
+    return removed
+
+
 def build_forward_adjusted_daily(
     project: Path,
     *,
@@ -348,7 +376,7 @@ def build_forward_adjusted_daily(
                         factor_events += 1
                         raw_return = raw_close / prior_raw - 1 if prior_raw > 0 else None
                         adjusted_return = adjusted_close / prior_adjusted - 1
-                        if abs(adjusted_return) > 0.20:
+                        if abs(adjusted_return) > CONTINUITY_THRESHOLD:
                             continuity_breaks += 1
                             worsened = bool(
                                 raw_return is not None
@@ -389,6 +417,20 @@ def build_forward_adjusted_daily(
     finally:
         connection.close()
 
+    detected_continuity_breaks = continuity_breaks
+    issue_symbols = {str(issue["symbol"]) for issue in continuity_issues}
+    quarantine_applied = bool(
+        continuity_issues
+        and all(issue["adjustment_worsened_jump"] for issue in continuity_issues)
+        and _quarantine_allowed(issue_symbols, len(latest_factor))
+    )
+    quarantined_rows = 0
+    if quarantine_applied:
+        output_paths = [output_daily / path.name for path in paths]
+        quarantined_rows = _remove_quarantined_symbols(output_paths, issue_symbols)
+        adjusted_rows -= quarantined_rows
+        continuity_breaks = 0
+
     issue_path = factor_dir / "continuity_issues.json"
     issue_path.write_text(
         json.dumps(continuity_issues, ensure_ascii=False, indent=2) + "\n",
@@ -398,8 +440,12 @@ def build_forward_adjusted_daily(
         "schema_version": 1,
         "status": (
             "validated"
-            if missing_factor_rows == 0 and continuity_breaks == 0
-            else "failed_validation"
+            if missing_factor_rows == 0 and detected_continuity_breaks == 0
+            else (
+                "validated_with_quarantine"
+                if missing_factor_rows == 0 and quarantine_applied
+                else "failed_validation"
+            )
         ),
         "mode": "forward_adjusted_from_backward_factor",
         "coverage_start": paths[0].stem,
@@ -412,11 +458,21 @@ def build_forward_adjusted_daily(
         "adjusted_rows": adjusted_rows,
         "missing_factor_rows": missing_factor_rows,
         "factor_change_events": factor_events,
-        "continuity_threshold": 0.20,
+        "continuity_threshold": CONTINUITY_THRESHOLD,
         "continuity_breaks": continuity_breaks,
+        "detected_continuity_breaks": detected_continuity_breaks,
         "continuity_worsened_events": continuity_worsened_events,
         "continuity_issues_path": str(issue_path),
         "continuity_issue_samples": continuity_issues[:20],
+        "quarantine_applied": quarantine_applied,
+        "quarantined_symbols": sorted(issue_symbols) if quarantine_applied else [],
+        "quarantined_rows": quarantined_rows,
+        "quarantine_max_ratio": MAX_QUARANTINE_RATIO,
+        "quarantine_reason": (
+            "factor-date alignment anomaly; symbol removed from adjusted research layer"
+            if quarantine_applied
+            else None
+        ),
         "generated_at": datetime.now(UTC).isoformat(),
     }
     manifest_path = factor_dir / "manifest.json"

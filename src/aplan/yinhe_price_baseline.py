@@ -476,7 +476,8 @@ def run_yinhe_price_baseline(
     raw_coverage_start = raw_paths[0].stem if raw_paths else _date_key(start_date)
     raw_coverage_end = raw_paths[-1].stem if raw_paths else _date_key(end_date)
     adjustment_ready = bool(
-        adjustment_manifest.get("status") == "validated"
+        adjustment_manifest.get("status")
+        in {"validated", "validated_with_quarantine"}
         and adjustment_manifest.get("continuity_breaks") == 0
         and adjustment_manifest.get("missing_factor_rows") == 0
         and adjustment_manifest.get("raw_prices_preserved") is True
@@ -739,6 +740,11 @@ def run_yinhe_price_baseline(
         "price_mode": price_mode,
         "adjustment_manifest": (
             str(adjustment_manifest_path) if adjustment_ready else None
+        ),
+        "quarantined_symbols": (
+            adjustment_manifest.get("quarantined_symbols", [])
+            if adjustment_ready
+            else []
         ),
         "data_profile": {
             "first_date": analysis_paths[0].stem,

@@ -225,6 +225,11 @@ aplan-yinhe build-adjustment --start 20230101 --end 20260724
 Continuity exceptions are written to
 `data/processed/yinhe_adj_factor/continuity_issues.json` with raw returns, adjusted
 returns, and factor ratios for review.
+
+The continuity check allows a 0.5 percentage-point quote-rounding margin above the
+20% board limit. If unresolved factor-date anomalies affect no more than 0.1% and at
+most five symbols, those complete symbols are removed from `yinhe_daily_qfq` and
+recorded in the manifest as `validated_with_quarantine`; raw files remain unchanged.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

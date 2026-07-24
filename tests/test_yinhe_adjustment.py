@@ -9,6 +9,7 @@ import unittest
 from aplan.yinhe_adjustment import (
     DAILY_FIELDS,
     _connect,
+    _quarantine_allowed,
     build_forward_adjusted_daily,
 )
 
@@ -36,6 +37,16 @@ def _write_day(path: Path, day: str, close: float) -> None:
 
 
 class YinheAdjustmentTests(unittest.TestCase):
+    def test_quarantine_requires_a_tiny_affected_share(self) -> None:
+        self.assertTrue(_quarantine_allowed({"603097"}, 4995))
+        self.assertFalse(_quarantine_allowed({"603097"}, 100))
+        self.assertFalse(
+            _quarantine_allowed(
+                {"000001", "000002", "000003", "000004", "000005", "000006"},
+                10_000,
+            )
+        )
+
     def test_builds_forward_adjusted_prices_and_preserves_raw(self) -> None:
         with TemporaryDirectory() as tmp:
             project = Path(tmp)

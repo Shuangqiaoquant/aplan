@@ -185,8 +185,11 @@ def _adjustment_check(project: Path, start: str, end: str) -> dict[str, Any]:
     manifest = _load_json(manifest_path)
     mode = str((manifest or {}).get("mode") or "")
     continuity_breaks = (manifest or {}).get("continuity_breaks")
+    status = str((manifest or {}).get("status") or "")
+    quarantined_symbols = (manifest or {}).get("quarantined_symbols") or []
     passed = bool(
         manifest
+        and status in {"validated", "validated_with_quarantine"}
         and "forward" in mode.lower()
         and _date_key(manifest.get("coverage_start")) <= start
         and _date_key(manifest.get("coverage_end")) >= end
@@ -203,7 +206,9 @@ def _adjustment_check(project: Path, start: str, end: str) -> dict[str, Any]:
             "manifest_path": str(manifest_path),
             "manifest_present": manifest is not None,
             "mode": mode or None,
+            "status": status or None,
             "continuity_breaks": continuity_breaks,
+            "quarantined_symbols": quarantined_symbols,
             "coverage_start": (manifest or {}).get("coverage_start"),
             "coverage_end": (manifest or {}).get("coverage_end"),
         },
@@ -728,7 +733,7 @@ def run_yinhe_acceptance(
             "与供应商字段文档及另一数据源抽样交叉核对。",
         )
     )
-    checks.append(_adjustment_check(project, start, end))
+    checks.append(_adjustment_check(project, actual_dates[0], actual_dates[-1]))
     checks.append(
         _check(
             "versioned_manifest_hashes",

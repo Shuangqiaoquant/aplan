@@ -210,12 +210,13 @@ class YinhePriceBaselineTests(unittest.TestCase):
             (factor_dir / "manifest.json").write_text(
                 json.dumps(
                     {
-                        "status": "validated",
+                        "status": "validated_with_quarantine",
                         "continuity_breaks": 0,
                         "missing_factor_rows": 0,
                         "raw_prices_preserved": True,
                         "coverage_start": raw_paths[0].stem,
                         "coverage_end": raw_paths[-1].stem,
+                        "quarantined_symbols": ["603097"],
                     }
                 ),
                 encoding="utf-8",
@@ -241,4 +242,5 @@ class YinhePriceBaselineTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "provisional_adjusted_price_only")
             self.assertEqual(report["price_mode"], "forward_adjusted")
+            self.assertEqual(report["quarantined_symbols"], ["603097"])
             self.assertNotIn("forward_adjustment_continuity", report["blocked_checks"])
