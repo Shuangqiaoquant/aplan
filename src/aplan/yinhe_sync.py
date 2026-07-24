@@ -760,7 +760,12 @@ class YinheClient:
                 end_date=trade_date,
                 interval=interval,
             )
-            rows.extend(self.query_kline(request))
+            try:
+                rows.extend(self.query_kline(request))
+            except YinheUpstreamError as exc:
+                if "数据为空" in str(exc):
+                    continue
+                raise
         return rows
 
     def fetch_snapshots(

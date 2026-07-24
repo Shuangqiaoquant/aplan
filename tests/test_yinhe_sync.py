@@ -20,6 +20,8 @@ from aplan.yinhe_sync import (
     sync_securities,
     sync_snapshots,
     sync_snapshots_amazing_data,
+    YinheClient,
+    YinheUpstreamError,
 )
 
 
@@ -223,6 +225,34 @@ class YinheSyncTests(unittest.TestCase):
         self.assertAlmostEqual(values[0]["open"], 10.1)
         self.assertAlmostEqual(values[0]["turnover"], 12345678.0)
         self.assertEqual(values[0]["is_suspended"], "0")
+
+    def test_fetch_daily_skips_symbols_with_empty_data(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with patch.object(
+            client,
+            "query_kline",
+            side_effect=[
+                YinheUpstreamError("银河 K 线查询失败：数据为空"),
+                [{"证券代码": "000001", "收盘价": "10"}],
+            ],
+        ):
+            rows = client.fetch_daily(["600001", "000001"], "20260722")
+
+        self.assertEqual(rows, [{"证券代码": "000001", "收盘价": "10"}])
+
+    def test_fetch_daily_keeps_nonempty_errors_fatal(self) -> None:
+        config = type("Config", (), {})()
+        client = YinheClient(config)
+        client._tgw = FakeTgw
+        with patch.object(
+            client,
+            "query_kline",
+            side_effect=YinheUpstreamError("银河 K 线查询失败：数据无权限"),
+        ):
+            with self.assertRaisesRegex(YinheUpstreamError, "数据无权限"):
+                client.fetch_daily(["600000"], "20260722")
 
     def test_snapshot_rows_normalize_to_snapshot_schema(self) -> None:
         rows = [
