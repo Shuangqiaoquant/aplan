@@ -178,31 +178,35 @@ def generate_signals(
             for configuration, index in next_signal.items()
             if day_index == index
         ]
-        if not due:
-            continue
-        scored = _score(
-            histories,
-            momentum_days=momentum_days,
-            min_history=min_history,
-            min_avg_turnover=min_avg_turnover,
-            top_n=top_n,
-        )
-        for horizon, offset in due:
-            configuration = f"{horizon}d_offset_{offset}"
-            for rank, (symbol, score) in enumerate(scored, 1):
-                signals.append(
-                    BaselineSignal(
-                        configuration=configuration,
-                        horizon=horizon,
-                        offset=offset,
-                        signal_index=day_index,
-                        signal_date=path.stem,
-                        symbol=symbol,
-                        rank=rank,
-                        score=score,
+        if due:
+            scored = _score(
+                histories,
+                momentum_days=momentum_days,
+                min_history=min_history,
+                min_avg_turnover=min_avg_turnover,
+                top_n=top_n,
+            )
+            for horizon, offset in due:
+                configuration = f"{horizon}d_offset_{offset}"
+                for rank, (symbol, score) in enumerate(scored, 1):
+                    signals.append(
+                        BaselineSignal(
+                            configuration=configuration,
+                            horizon=horizon,
+                            offset=offset,
+                            signal_index=day_index,
+                            signal_date=path.stem,
+                            symbol=symbol,
+                            rank=rank,
+                            score=score,
+                        )
                     )
-                )
-            next_signal[(horizon, offset)] += horizon
+                next_signal[(horizon, offset)] += horizon
+        if (day_index + 1) % 100 == 0 or day_index + 1 == len(paths):
+            print(
+                f"银河基线信号扫描：{day_index + 1}/{len(paths)}，"
+                f"累计信号={len(signals)}"
+            )
     return signals, market_proxy_returns
 
 
@@ -294,6 +298,11 @@ def evaluate_signals(
                     entry_price=entry_price,
                     target_exit_index=day_index + signal.horizon,
                 )
+            )
+        if (day_index + 1) % 100 == 0 or day_index + 1 == len(paths):
+            print(
+                f"银河基线收益计算：{day_index + 1}/{len(paths)}，"
+                f"累计结果={len(results)}"
             )
     return results
 
