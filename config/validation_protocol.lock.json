@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "protocol_id": "aplan_validation_v1_0",
+  "version": "1.0.0",
+  "frozen_on": "2026-07-24",
+  "protocol_sha256": "3509b1bef259ff356cc509a6642bc668608454fe76fbfa0d87ef4ab25cce4d00",
+  "change_reason": "在银河三年数据结果揭示前预先冻结基线、周期、指标、样本外设计、Agent消融与停止条件；预测输入限定为复权量价",
+  "change_control": "任何口径变化必须更新版本、原因和锁；历史报告继续引用原哈希"
+}

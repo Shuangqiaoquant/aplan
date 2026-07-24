@@ -1499,6 +1499,7 @@ def main() -> None:
             "backfill-daily",
             "backfill-range",
             "audit-daily",
+            "acceptance",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1520,6 +1521,8 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=250, help="backfill-range 每块股票数量，默认 250")
     parser.add_argument("--query-retries", type=int, default=3, help="backfill-range 查询超时后的重试次数，默认 3")
     parser.add_argument("--retry-delay", type=float, default=5.0, help="backfill-range 重试基础等待秒数，默认 5")
+    parser.add_argument("--calendar-file", help="acceptance 使用的独立交易日历 CSV")
+    parser.add_argument("--acceptance-output", help="acceptance 报告输出目录")
     parser.add_argument("--delay", type=float, default=0.0, help="backfill-daily 每个日期之间等待秒数，默认 0")
     parser.add_argument(
         "--overwrite",
@@ -1600,6 +1603,18 @@ def main() -> None:
             if not symbols:
                 raise SystemExit("audit-daily 必须通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
             result = audit_daily_coverage(root, args.date, symbols)
+        elif args.command == "acceptance":
+            if not args.start or not args.end:
+                raise SystemExit("acceptance 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            from .yinhe_acceptance import run_yinhe_acceptance
+
+            result = run_yinhe_acceptance(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                calendar_file=Path(args.calendar_file).resolve() if args.calendar_file else None,
+                output_dir=Path(args.acceptance_output).resolve() if args.acceptance_output else None,
+            )
         elif args.command == "snapshot":
             if not args.date:
                 raise SystemExit("snapshot 必须提供 --date YYYYMMDD")

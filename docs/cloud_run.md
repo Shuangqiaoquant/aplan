@@ -156,6 +156,37 @@ Use a smaller `--chunk-size` on a low-memory server. Do not pass `--overwrite` w
 resuming, because it intentionally ignores checkpoints and re-queries every chunk.
 Transient supplier timeouts are retried three times by default with increasing waits.
 Tune this with `--query-retries` and `--retry-delay` when the upstream service is unstable.
+
+## Yinhe Three-Year Acceptance
+
+The validation design is frozen before results are inspected:
+
+```bash
+python -m aplan.validation_protocol verify
+```
+
+After all yearly backfills finish, generate the versioned JSON report, readable Markdown
+report, and per-file SHA-256 manifest with one command:
+
+```bash
+aplan-yinhe acceptance \
+  --start 20230101 \
+  --end 20260722 \
+  --calendar-file data/processed/trade_calendar.csv
+```
+
+Outputs:
+
+```text
+reports/yinhe_acceptance/latest.json
+reports/yinhe_acceptance/latest.md
+data/processed/yinhe_daily_manifest.json
+```
+
+The acceptance result separates mechanical ingestion integrity from strict backtest
+readiness. Missing an independent trading calendar, point-in-time security history, or
+verified forward-adjustment continuity is reported as `blocked`, never silently treated
+as passed.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

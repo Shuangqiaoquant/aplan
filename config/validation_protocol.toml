@@ -1,0 +1,106 @@
+schema_version = 1
+protocol_id = "aplan_validation_v1_0"
+version = "1.0.0"
+status = "frozen"
+frozen_on = "2026-07-24"
+research_only = true
+
+[baseline]
+model_id = "historical_price_only_v0_1"
+name = "纯量价横截面基线"
+predictive_inputs = ["adjusted_ohlcv"]
+eligibility_inputs = ["point_in_time_universe"]
+evaluation_only_inputs = ["market_index", "industry_classification"]
+forbidden_inputs = ["themes", "announcements", "news", "intraday_confirmation", "portfolio_heat"]
+candidate_count = 10
+weighting = "equal_weight"
+rebalance_step_trading_days = 5
+
+[horizons]
+evaluation_days = [1, 5, 10, 20, 40, 60]
+all_horizons_required = false
+selection_rule = "仅用训练集选择满足稳定性门槛的周期；样本外和最终留出集只能接受或拒绝，不得改选周期"
+
+[time_design]
+development_start = "2023-01-01"
+development_end = "2024-12-31"
+rolling_oos_start = "2025-01-01"
+rolling_oos_end = "2025-12-31"
+final_holdout_start = "2026-01-01"
+final_holdout_end = "2026-07-22"
+purge_trading_days = 60
+rolling_train_days = 504
+rolling_test_days = 63
+rolling_step_days = 21
+minimum_rolling_windows = 6
+final_holdout_open_once = true
+
+[multiple_starts]
+method = "quarter_horizon_offsets"
+minimum_positive_start_ratio = 0.75
+
+[market_regimes]
+classification_source = "market_index_only"
+dimensions = ["trend", "volatility"]
+trend_rule = "index_close_vs_ma120_and_ma120_slope"
+volatility_rule = "training_sample_terciles_of_20d_realized_volatility"
+minimum_regime_sample_count = 30
+
+[benchmarks]
+market = "000300.SH"
+industry = "point_in_time_equal_weight_industry_universe"
+same_day_candidate = "baseline_candidates_before_agent_adjustments"
+fallback_rule = "缺少行业或市场基准时该样本不计入相应超额指标，不以零替代"
+
+[metrics]
+primary = ["net_excess_return", "median_net_excess_return", "excess_win_rate"]
+risk = ["max_drawdown", "turnover_rate", "transaction_cost"]
+distribution = ["p05", "p25", "p50", "p75", "p95", "tail_loss_rate"]
+report_gross_and_net = true
+
+[costs]
+commission_rate_each_side = 0.0003
+stamp_tax_rate_sell = 0.0005
+slippage_rate_each_side = 0.001
+minimum_commission_mode = "sensitivity_only"
+turnover_definition = "one_half_sum_absolute_weight_change"
+
+[stability_gate]
+minimum_oos_observations = 100
+minimum_rebalance_cohorts = 60
+minimum_positive_rolling_window_ratio = 0.60
+minimum_positive_market_regime_ratio = 0.60
+minimum_median_net_excess_return = 0.0
+maximum_drawdown = 0.25
+
+[agent_ablation]
+baseline_first = true
+agents = ["market_theme", "announcement_risk", "intraday_confirmation", "portfolio_heat"]
+method = "leave_one_agent_out_and_incremental_addition"
+automatic_weight_change = false
+human_confirmation_required = true
+
+[stopping_rule]
+minimum_candidate_observations = 300
+minimum_rebalance_cohorts = 60
+minimum_agent_oos_observations = 100
+minimum_incremental_median_excess_return = 0.0
+minimum_positive_incremental_window_ratio = 0.60
+merge_overlap_threshold = 0.80
+decision = "达到样本门槛后仍无稳定净增量则停用；与其他 Agent 信号重合度达到门槛且无独立增量则合并"
+
+[data_acceptance]
+expected_start = "2023-01-01"
+expected_end = "2026-07-22"
+minimum_latest_coverage = 0.98
+minimum_median_daily_coverage = 0.95
+maximum_duplicate_keys = 0
+maximum_invalid_ohlc_rows = 0
+maximum_zero_turnover_ratio = 0.10
+required_gem_prefixes = ["300", "301"]
+price_unit = "CNY_per_share"
+volume_unit = "shares"
+turnover_unit = "CNY"
+adjustment_mode = "forward_adjusted_for_features_raw_preserved"
+point_in_time_required = true
+strict_availability_lag_required = true
