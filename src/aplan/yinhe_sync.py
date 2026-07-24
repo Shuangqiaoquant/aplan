@@ -8,7 +8,7 @@ import multiprocessing
 import os
 import queue
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -191,6 +191,18 @@ def _read_symbols(symbols: str | None, symbols_file: str | None = None) -> list[
             seen.add(symbol)
             output.append(symbol)
     return output
+
+
+def _weekdays_between(start_date: str, end_date: str) -> list[str]:
+    start = datetime.strptime(str(start_date).replace("-", ""), "%Y%m%d").date()
+    end = datetime.strptime(str(end_date).replace("-", ""), "%Y%m%d").date()
+    dates: list[str] = []
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            dates.append(current.strftime("%Y%m%d"))
+        current += timedelta(days=1)
+    return dates
 
 
 def _infer_market(symbol: str) -> str:
@@ -804,6 +816,95 @@ def sync_daily(
     }
 
 
+def backfill_daily(
+    root: Path,
+    start_date: str,
+    end_date: str,
+    *,
+    symbols: list[str],
+    config: YinheConfig | None = None,
+    interval: str | int = "day",
+    max_days: int | None = None,
+    delay_seconds: float = 0.0,
+    overwrite: bool = False,
+    fetcher: Callable[[str], list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    if not symbols:
+        raise ValueError("请通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
+    dates = _weekdays_between(start_date, end_date)
+    pending = [
+        day
+        for day in dates
+        if overwrite or not (root / "data" / "processed" / "yinhe_daily" / f"{day}.csv").exists()
+    ]
+    if max_days is not None:
+        pending = pending[:max_days]
+
+    summary: dict[str, Any] = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "symbols": len(symbols),
+        "trade_dates": len(dates),
+        "pending": len(pending),
+        "completed": 0,
+        "failed": 0,
+    }
+
+    def write_day(day: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        daily = normalize_daily_rows(rows, day)
+        _write_snapshot(
+            root / "data" / "raw" / "yinhe" / day / "daily.json",
+            "QueryKline",
+            rows,
+        )
+        processed_path = root / "data" / "processed" / "yinhe_daily" / f"{day}.csv"
+        _write_csv(processed_path, daily, DAILY_FIELDS)
+        return {
+            "trade_date": day,
+            "raw_rows": len(rows),
+            "daily_rows": len(daily),
+            "processed_path": str(processed_path),
+        }
+
+    if fetcher:
+        for index, day in enumerate(pending, 1):
+            try:
+                result = write_day(day, fetcher(day))
+            except Exception as exc:  # noqa: BLE001 - CLI 批处理需要保留断点
+                summary["failed"] += 1
+                print(f"[{index}/{len(pending)}] {day}：failed={exc}")
+                break
+            summary["completed"] += 1
+            print(f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}")
+            if delay_seconds > 0:
+                import time
+
+                time.sleep(delay_seconds)
+        return summary
+
+    client = YinheClient(config or YinheConfig.from_env())
+    if not client.login():
+        raise YinheUpstreamError("银河登录失败，请检查账号、密码、IP、端口和账号权限")
+    try:
+        for index, day in enumerate(pending, 1):
+            try:
+                rows = client.fetch_daily(symbols, day, interval=interval)
+                result = write_day(day, rows)
+            except Exception as exc:  # noqa: BLE001 - 供应商 SDK 异常类型不稳定
+                summary["failed"] += 1
+                print(f"[{index}/{len(pending)}] {day}：failed={exc}")
+                break
+            summary["completed"] += 1
+            print(f"[{index}/{len(pending)}] {day}：daily={result['daily_rows']}")
+            if delay_seconds > 0:
+                import time
+
+                time.sleep(delay_seconds)
+    finally:
+        client.close()
+    return summary
+
+
 def sync_snapshots(
     root: Path,
     trade_date: str,
@@ -933,14 +1034,19 @@ def sync_snapshots_amazing_data(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="同步中国银河星耀数智数据")
-    parser.add_argument("command", choices=["securities", "daily", "snapshot", "snapshot-ad"])
+    parser.add_argument("command", choices=["securities", "daily", "backfill-daily", "snapshot", "snapshot-ad"])
     parser.add_argument("--root", default=".")
     parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--start", help="开始日期，格式 YYYYMMDD；backfill-daily 需要")
+    parser.add_argument("--end", help="结束日期，格式 YYYYMMDD；backfill-daily 需要")
     parser.add_argument("--date", help="交易日，格式 YYYYMMDD；daily/snapshot 需要")
     parser.add_argument("--as-of", help="观察日期，格式 YYYY-MM-DD；仅 securities 需要")
     parser.add_argument("--symbols", help="逗号分隔六位股票代码；daily/snapshot 需要")
     parser.add_argument("--symbols-file", help="包含六位股票代码的文本/CSV文件；daily/snapshot 需要")
     parser.add_argument("--interval", default="day", help="K线周期，默认 day；可用 1m/5m/day/week/month 等")
+    parser.add_argument("--max-days", type=int, help="backfill-daily 本批最多处理多少个工作日")
+    parser.add_argument("--delay", type=float, default=0.0, help="backfill-daily 每个日期之间等待秒数，默认 0")
+    parser.add_argument("--overwrite", action="store_true", help="backfill-daily 覆盖已存在的日期文件")
     parser.add_argument("--level-type", type=int, default=1, help="快照 Level 类型，默认 1")
     parser.add_argument("--begin-time", type=int, default=0, help="查询开始时间，默认 0；可试 93000000")
     parser.add_argument("--end-time", type=int, default=0, help="查询结束时间，默认 0；可试 150000000")
@@ -964,6 +1070,23 @@ def main() -> None:
                 symbols=symbols,
                 config=YinheConfig.from_env(args.env_file),
                 interval=args.interval,
+            )
+        elif args.command == "backfill-daily":
+            if not args.start or not args.end:
+                raise SystemExit("backfill-daily 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit("backfill-daily 必须通过 --symbols 或 --symbols-file 提供至少一个六位股票代码")
+            result = backfill_daily(
+                root,
+                args.start,
+                args.end,
+                symbols=symbols,
+                config=YinheConfig.from_env(args.env_file),
+                interval=args.interval,
+                max_days=args.max_days,
+                delay_seconds=args.delay,
+                overwrite=args.overwrite,
             )
         elif args.command == "snapshot":
             if not args.date:

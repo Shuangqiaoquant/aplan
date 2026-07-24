@@ -7,6 +7,7 @@ from unittest.mock import patch
 import unittest
 
 from aplan.yinhe_sync import (
+    backfill_daily,
     build_kline_request,
     build_security_info_request,
     build_snapshot_request,
@@ -239,6 +240,42 @@ class YinheSyncTests(unittest.TestCase):
             self.assertIn("20260706", Path(daily_result["processed_path"]).read_text(encoding="utf-8"))
             self.assertIn("10.1", Path(snapshot_result["processed_path"]).read_text(encoding="utf-8"))
             self.assertIn("10.2", Path(snapshot_ad_result["processed_path"]).read_text(encoding="utf-8"))
+
+    def test_backfill_daily_skips_existing_dates_and_writes_outputs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            existing = root / "data" / "processed" / "yinhe_daily" / "20260701.csv"
+            existing.parent.mkdir(parents=True)
+            existing.write_text("symbol,trade_date\n600000,20260701\n", encoding="utf-8")
+
+            seen_dates: list[str] = []
+
+            def fetcher(day: str) -> list[dict[str, str]]:
+                seen_dates.append(day)
+                return [
+                    {
+                        "证券代码": "600000",
+                        "交易日期": day,
+                        "开盘价": "10",
+                        "收盘价": "11",
+                    }
+                ]
+
+            result = backfill_daily(
+                root,
+                "20260701",
+                "20260703",
+                symbols=["600000"],
+                max_days=2,
+                fetcher=fetcher,
+            )
+
+            self.assertEqual(seen_dates, ["20260702", "20260703"])
+            self.assertEqual(result["trade_dates"], 3)
+            self.assertEqual(result["pending"], 2)
+            self.assertEqual(result["completed"], 2)
+            self.assertTrue((root / "data" / "processed" / "yinhe_daily" / "20260702.csv").exists())
+            self.assertTrue((root / "data" / "raw" / "yinhe" / "20260703" / "daily.json").exists())
 
 
 if __name__ == "__main__":
