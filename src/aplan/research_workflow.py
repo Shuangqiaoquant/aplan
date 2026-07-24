@@ -19,6 +19,7 @@ from .io import (
 from .models import Candidate, DailyBar, FundamentalSnapshot
 from .pipeline import select_candidates
 from .reports import render_daily_report
+from .research_funnel import UserConstraints, run_funnel, write_funnel_run
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,10 @@ def _lookback(horizon: str) -> int:
 
 def _date_key(as_of: date) -> str:
     return as_of.strftime("%Y%m%d")
+
+
+def _split_cli_values(value: str | None) -> tuple[str, ...]:
+    return tuple(item.strip() for item in (value or "").split(",") if item.strip())
 
 
 def _load_bars_source(path: str | Path, as_of: date) -> list[DailyBar]:
@@ -198,7 +203,105 @@ def main() -> None:
     parser.add_argument("--akshare-retry-delay", type=float, default=2.0)
     parser.add_argument("--output", help="报告输出路径；不传则打印")
     parser.add_argument("--evidence-output", help="数据补证 JSON 输出路径；可选")
+    parser.add_argument("--funnel", action="store_true", help="运行策略驱动的可审计研究漏斗")
+    parser.add_argument(
+        "--strategy-profile",
+        choices=["momentum", "event", "fundamental", "hybrid"],
+        default="hybrid",
+        help="研究漏斗的数据需求类型",
+    )
+    parser.add_argument("--industries", help="用户偏好的行业，逗号分隔；只约束范围，不修改评分")
+    parser.add_argument("--prefixes", help="允许的股票代码前缀，逗号分隔")
+    parser.add_argument("--include-symbols", help="用户指定的研究股票，逗号分隔")
+    parser.add_argument("--exclude-symbols", help="用户排除的股票，逗号分隔")
+    parser.add_argument("--exclude-star", action="store_true", help="研究漏斗排除科创板")
+    parser.add_argument("--exclude-chinext", action="store_true", help="研究漏斗排除创业板")
+    parser.add_argument(
+        "--risk-preference",
+        choices=["conservative", "balanced", "aggressive"],
+        default="balanced",
+        help="记录用户风险偏好；当前不直接修改评分",
+    )
+    parser.add_argument("--broad-pool", type=int, default=300, help="低成本粗筛池大小")
+    parser.add_argument("--refined-pool", type=int, default=50, help="策略数据精筛池大小")
+    parser.add_argument("--confirm-refinement", action="store_true", help="确认粗筛结果并继续精筛")
+    parser.add_argument("--funnel-output", help="研究漏斗 JSON 输出路径；默认写入 runs/research_funnel")
     args = parser.parse_args()
+
+    if args.funnel:
+        securities = load_securities_csv(args.securities)
+        bars = _load_bars_source(args.bars, date.fromisoformat(args.date))
+        optional = _load_optional_inputs(
+            valuations_path=args.valuations,
+            fundamentals_path=args.fundamentals,
+            announcements_path=args.announcements,
+            announcement_analysis_path=args.announcement_analysis,
+        )
+        available_datasets = {
+            name
+            for name, path in (
+                ("valuations", args.valuations),
+                ("fundamentals", args.fundamentals),
+                ("announcements", args.announcements),
+                ("announcement_fulltext", args.announcement_analysis),
+            )
+            if path and Path(path).exists()
+        }
+        funnel_run = run_funnel(
+            securities,
+            bars,
+            date.fromisoformat(args.date),
+            strategy_profile=args.strategy_profile,
+            constraints=UserConstraints(
+                industries=_split_cli_values(args.industries),
+                prefixes=_split_cli_values(args.prefixes),
+                include_symbols=_split_cli_values(args.include_symbols),
+                exclude_symbols=_split_cli_values(args.exclude_symbols),
+                allow_star=not args.exclude_star,
+                allow_chinext=not args.exclude_chinext,
+                risk_preference=args.risk_preference,
+            ),
+            broad_pool_size=args.broad_pool,
+            refined_pool_size=args.refined_pool,
+            final_top_n=args.top,
+            confirmed=args.confirm_refinement,
+            valuations=optional["valuations"],
+            fundamentals=optional["fundamentals"],
+            announcement_events=optional["announcement_events"],
+            fulltext_analyses=optional["fulltext_analyses"],
+            horizon=args.horizon,
+            momentum_days=_lookback(args.horizon),
+            available_datasets=available_datasets,
+        )
+        funnel_path = write_funnel_run(
+            Path(args.root).resolve(),
+            funnel_run,
+            Path(args.funnel_output) if args.funnel_output else None,
+        )
+        payload = funnel_run.to_dict()
+        print(
+            json.dumps(
+                {
+                    "run_id": funnel_run.run_id,
+                    "status": funnel_run.status,
+                    "output_path": str(funnel_path),
+                    "stage_counts": {
+                        stage["stage_id"]: stage["output_count"]
+                        for stage in payload["stages"]
+                    },
+                    "missing_or_planned_data": [
+                        requirement
+                        for requirement in payload["data_requirements"]
+                        if requirement["availability"] != "available"
+                    ],
+                    "final_candidates": len(funnel_run.final_candidates),
+                    "execution_allowed": False,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
 
     result = run_research_report(
         Path(args.root).resolve(),
