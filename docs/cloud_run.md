@@ -230,6 +230,22 @@ The continuity check allows a 0.5 percentage-point quote-rounding margin above t
 20% board limit. If unresolved factor-date anomalies affect no more than 0.1% and at
 most five symbols, those complete symbols are removed from `yinhe_daily_qfq` and
 recorded in the manifest as `validated_with_quarantine`; raw files remain unchanged.
+
+Build the historical point-in-time A-share universe and daily security-state database:
+
+```bash
+aplan-yinhe security-history-ad \
+  --start 20230101 \
+  --end 20260724 \
+  --chunk-size 50
+```
+
+The command uses Galaxy's historical code list, stock basic information, and daily
+history status interfaces. It stores listing/delisting metadata, ST intervals,
+suspensions, price limits, and ex-right/ex-dividend flags under
+`data/processed/security_history`. Chunk checkpoints make the download resumable.
+The manifest does not claim strict publication timing because the supplier manual
+does not provide an exact publication timestamp for historical status rows.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

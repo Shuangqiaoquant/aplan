@@ -1598,6 +1598,7 @@ def main() -> None:
             "repair-turnover",
             "adjustment-ad",
             "build-adjustment",
+            "security-history-ad",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1749,6 +1750,21 @@ def main() -> None:
                 root,
                 start_date=args.start,
                 end_date=args.end,
+            )
+        elif args.command == "security-history-ad":
+            if not args.start or not args.end:
+                raise SystemExit(
+                    "security-history-ad 必须提供 --start YYYYMMDD 和 --end YYYYMMDD"
+                )
+            from .yinhe_security_history import sync_security_history
+
+            result = sync_security_history(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                config=YinheConfig.from_env(args.env_file),
+                chunk_size=args.chunk_size,
+                overwrite=args.overwrite,
             )
         elif args.command == "snapshot":
             if not args.date:
