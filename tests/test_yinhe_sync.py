@@ -277,6 +277,35 @@ class YinheSyncTests(unittest.TestCase):
         self.assertAlmostEqual(values[0]["turnover"], 12345678.0)
         self.assertEqual(values[0]["is_suspended"], "0")
 
+    def test_daily_rows_use_sdk_kline_time_as_trade_date(self) -> None:
+        rows = [
+            {
+                "security_code": "600000",
+                "kline_time": 20260721000000000,
+                "open_price": "10.1",
+                "close_price": "10.3",
+                "volume_trade": "1000",
+                "value_trade": "10300",
+            },
+            {
+                "security_code": "600000",
+                "kline_time": 20260722000000000,
+                "open_price": "10.3",
+                "close_price": "10.4",
+                "volume_trade": "1100",
+                "value_trade": "11440",
+            },
+        ]
+
+        values = normalize_daily_rows(rows, "20260722")
+
+        self.assertEqual(
+            [item["trade_date"] for item in values],
+            ["20260721", "20260722"],
+        )
+        self.assertEqual(values[0]["volume"], 1000.0)
+        self.assertEqual(values[1]["turnover"], 11440.0)
+
     def test_audit_daily_coverage_writes_missing_symbols_and_prefix_counts(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -484,19 +513,19 @@ class YinheSyncTests(unittest.TestCase):
                 fetcher=lambda: [
                     {
                         "证券代码": "600000",
-                        "交易日期": "20260701",
+                        "kline_time": 20260701000000000,
                         "开盘价": "10",
                         "收盘价": "11",
                     },
                     {
                         "证券代码": "000001",
-                        "交易日期": "20260701",
+                        "kline_time": 20260701000000000,
                         "开盘价": "12",
                         "收盘价": "13",
                     },
                     {
                         "证券代码": "600000",
-                        "交易日期": "20260702",
+                        "kline_time": 20260702000000000,
                         "开盘价": "11",
                         "收盘价": "12",
                     },

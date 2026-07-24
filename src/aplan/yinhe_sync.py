@@ -526,7 +526,17 @@ def normalize_daily_rows(rows: list[dict[str, Any]], trade_date: str) -> list[di
         symbol = _strip_suffix(_first_value(row, "证券代码", "security_code", "symbol", "code"))
         if len(symbol) != 6 or not symbol.isdigit():
             continue
-        row_date = _date_key(_first_value(row, "交易日期", "trade_date", "date")) or fallback_date
+        row_date = _date_key(
+            _first_value(
+                row,
+                "交易日期",
+                "trade_date",
+                "date",
+                "kline_time",
+                "orig_time",
+                "K线时间",
+            )
+        ) or fallback_date
         output.append(
             {
                 "symbol": symbol,
@@ -1193,7 +1203,17 @@ def backfill_daily_range(
 
     raw_by_date: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        day = _date_key(_first_value(row, "交易日期", "trade_date", "date"))
+        day = _date_key(
+            _first_value(
+                row,
+                "交易日期",
+                "trade_date",
+                "date",
+                "kline_time",
+                "orig_time",
+                "K线时间",
+            )
+        )
         if start_key <= day <= end_key:
             raw_by_date.setdefault(day, []).append(row)
 
