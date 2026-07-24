@@ -216,6 +216,15 @@ aplan-yinhe adjustment-ad \
 The command preserves `yinhe_daily`, stores factors in SQLite, writes adjusted files to
 `yinhe_daily_qfq`, saves the official Galaxy calendar, and validates continuity around
 factor changes. Re-running without `--overwrite` reuses completed factor chunks.
+To rebuild and diagnose the adjusted layer without querying Galaxy again:
+
+```bash
+aplan-yinhe build-adjustment --start 20230101 --end 20260724
+```
+
+Continuity exceptions are written to
+`data/processed/yinhe_adj_factor/continuity_issues.json` with raw returns, adjusted
+returns, and factor ratios for review.
 - Optional AkShare financial indicators for a provided symbol list.
 - Evidence coverage report.
 

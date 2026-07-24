@@ -302,9 +302,11 @@ def build_forward_adjusted_daily(
             (end,),
         )
     }
-    previous: dict[str, tuple[str, float, float]] = {}
+    previous: dict[str, tuple[str, float, float, float]] = {}
     factor_events = 0
     continuity_breaks = 0
+    continuity_worsened_events = 0
+    continuity_issues: list[dict[str, Any]] = []
     missing_factor_rows = 0
     adjusted_rows = 0
 
@@ -336,16 +338,41 @@ def build_forward_adjusted_daily(
                 adjusted_rows += 1
 
                 prior = previous.get(symbol)
+                raw_close = _float(row.get("close"))
                 adjusted_close = _float(adjusted["close"])
                 if prior is not None:
-                    prior_day, prior_adjusted, prior_factor = prior
+                    prior_day, prior_raw, prior_adjusted, prior_factor = prior
                     consecutive = date_index.get(path.stem, -2) == date_index.get(prior_day, -1) + 1
                     factor_changed = abs(factor / prior_factor - 1) > 1e-10
                     if consecutive and factor_changed and prior_adjusted > 0:
                         factor_events += 1
-                        if abs(adjusted_close / prior_adjusted - 1) > 0.20:
+                        raw_return = raw_close / prior_raw - 1 if prior_raw > 0 else None
+                        adjusted_return = adjusted_close / prior_adjusted - 1
+                        if abs(adjusted_return) > 0.20:
                             continuity_breaks += 1
-                previous[symbol] = (path.stem, adjusted_close, factor)
+                            worsened = bool(
+                                raw_return is not None
+                                and abs(adjusted_return) > abs(raw_return) + 1e-8
+                            )
+                            continuity_worsened_events += int(worsened)
+                            continuity_issues.append(
+                                {
+                                    "symbol": symbol,
+                                    "previous_date": prior_day,
+                                    "trade_date": path.stem,
+                                    "previous_raw_close": prior_raw,
+                                    "raw_close": raw_close,
+                                    "previous_adjusted_close": prior_adjusted,
+                                    "adjusted_close": adjusted_close,
+                                    "previous_factor": prior_factor,
+                                    "factor": factor,
+                                    "factor_ratio": factor / prior_factor,
+                                    "raw_return": raw_return,
+                                    "adjusted_return": adjusted_return,
+                                    "adjustment_worsened_jump": worsened,
+                                }
+                            )
+                previous[symbol] = (path.stem, raw_close, adjusted_close, factor)
 
             output_path = output_daily / path.name
             temporary = output_path.with_suffix(".tmp")
@@ -362,6 +389,11 @@ def build_forward_adjusted_daily(
     finally:
         connection.close()
 
+    issue_path = factor_dir / "continuity_issues.json"
+    issue_path.write_text(
+        json.dumps(continuity_issues, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     manifest = {
         "schema_version": 1,
         "status": (
@@ -382,6 +414,9 @@ def build_forward_adjusted_daily(
         "factor_change_events": factor_events,
         "continuity_threshold": 0.20,
         "continuity_breaks": continuity_breaks,
+        "continuity_worsened_events": continuity_worsened_events,
+        "continuity_issues_path": str(issue_path),
+        "continuity_issue_samples": continuity_issues[:20],
         "generated_at": datetime.now(UTC).isoformat(),
     }
     manifest_path = factor_dir / "manifest.json"

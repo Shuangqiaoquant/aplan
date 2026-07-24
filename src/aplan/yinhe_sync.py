@@ -1597,6 +1597,7 @@ def main() -> None:
             "acceptance",
             "repair-turnover",
             "adjustment-ad",
+            "build-adjustment",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1738,6 +1739,16 @@ def main() -> None:
                 config=YinheConfig.from_env(args.env_file),
                 chunk_size=args.chunk_size,
                 overwrite=args.overwrite,
+            )
+        elif args.command == "build-adjustment":
+            if not args.start or not args.end:
+                raise SystemExit("build-adjustment 必须提供 --start YYYYMMDD 和 --end YYYYMMDD")
+            from .yinhe_adjustment import build_forward_adjusted_daily
+
+            result = build_forward_adjusted_daily(
+                root,
+                start_date=args.start,
+                end_date=args.end,
             )
         elif args.command == "snapshot":
             if not args.date:

@@ -89,6 +89,18 @@ class YinheAdjustmentTests(unittest.TestCase):
             self.assertEqual(manifest["continuity_breaks"], 0)
             self.assertEqual(manifest["factor_change_events"], 1)
             self.assertTrue(manifest["raw_prices_preserved"])
+            self.assertEqual(
+                json.loads(
+                    (
+                        project
+                        / "data"
+                        / "processed"
+                        / "yinhe_adj_factor"
+                        / "continuity_issues.json"
+                    ).read_text(encoding="utf-8")
+                ),
+                [],
+            )
 
     def test_missing_factor_blocks_validation(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -117,3 +129,48 @@ class YinheAdjustmentTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed_validation")
             self.assertEqual(result["missing_factor_rows"], 1)
             self.assertEqual(result["continuity_breaks"], 0)
+
+    def test_continuity_report_exposes_worsened_adjustment_jump(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            raw = project / "data" / "processed" / "yinhe_daily"
+            _write_day(raw / "20230102.csv", "20230102", 10.0)
+            _write_day(raw / "20230103.csv", "20230103", 5.0)
+            calendar = project / "data" / "processed" / "trade_calendar.csv"
+            calendar.parent.mkdir(parents=True, exist_ok=True)
+            calendar.write_text(
+                "trade_date,is_open\n20230102,1\n20230103,1\n",
+                encoding="utf-8",
+            )
+            database = (
+                project
+                / "data"
+                / "processed"
+                / "yinhe_adj_factor"
+                / "backward_factors.sqlite3"
+            )
+            connection = _connect(database)
+            with connection:
+                connection.executemany(
+                    "INSERT INTO backward_factors VALUES (?, ?, ?)",
+                    [
+                        ("20230102", "600000", 1.0),
+                        ("20230103", "600000", 0.5),
+                    ],
+                )
+            connection.close()
+
+            result = build_forward_adjusted_daily(
+                project,
+                start_date="20230102",
+                end_date="20230103",
+            )
+            issues = json.loads(
+                Path(result["continuity_issues_path"]).read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(result["continuity_breaks"], 1)
+            self.assertEqual(result["continuity_worsened_events"], 1)
+            self.assertTrue(issues[0]["adjustment_worsened_jump"])
+            self.assertAlmostEqual(issues[0]["raw_return"], -0.5)
+            self.assertAlmostEqual(issues[0]["adjusted_return"], -0.75)
