@@ -229,6 +229,28 @@ class AnnouncementTests(unittest.TestCase):
             self.assertEqual(result["missing_availability_rows"], 0)
             self.assertEqual(result["pending_availability_rows"], 2)
 
+    def test_archive_fails_when_a_calendar_day_file_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            source = project / "data" / "processed" / "announcements"
+            source.mkdir(parents=True)
+            (source / "20230103.json").write_text(
+                json.dumps({"announcements": [], "events": []}),
+                encoding="utf-8",
+            )
+            result = build_announcement_archive(
+                project,
+                start="20230103",
+                end="20230104",
+                trade_calendar=["20230103", "20230104", "20230105"],
+            )
+            self.assertEqual(result["status"], "failed_validation")
+            self.assertEqual(result["missing_daily_files"], 1)
+            self.assertEqual(
+                result["missing_daily_file_samples"],
+                ["20230104"],
+            )
+
     def test_sync_rejects_incomplete_reported_pagination(self) -> None:
         class IncompleteClient:
             def query_page(

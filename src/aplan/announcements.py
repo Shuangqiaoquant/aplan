@@ -560,6 +560,11 @@ def build_announcement_archive(
         for path in sorted(source.glob("*.json"))
         if path.stem.isdigit() and start <= path.stem <= end
     ]
+    expected_dates = _calendar_dates(start, end)
+    observed_dates = {path.stem for path in files}
+    missing_daily_files = [
+        day for day in expected_dates if day not in observed_dates
+    ]
     with (
         announcement_path.open("w", encoding="utf-8", newline="") as ann_handle,
         event_path.open("w", encoding="utf-8", newline="") as event_handle,
@@ -624,12 +629,15 @@ def build_announcement_archive(
         "schema_version": 1,
         "status": (
             "validated"
-            if files and not missing_availability
+            if files and not missing_availability and not missing_daily_files
             else "failed_validation"
         ),
         "start_date": start,
         "end_date": end,
         "daily_files": len(files),
+        "expected_daily_files": len(expected_dates),
+        "missing_daily_files": len(missing_daily_files),
+        "missing_daily_file_samples": missing_daily_files[:20],
         "announcements": announcement_count,
         "events": event_count,
         "duplicate_announcements_skipped": duplicate_announcements,
@@ -814,6 +822,8 @@ def main() -> None:
         )
     if args.command in {"backfill", "build-archive"}:
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.command == "backfill" and result.get("status") != "completed":
+            raise SystemExit(1)
         return
     events = result.get("events", [])
     risk_counts = {
