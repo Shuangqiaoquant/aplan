@@ -8,12 +8,14 @@ from pathlib import Path
 
 from aplan.announcements import (
     Announcement,
+    CninfoError,
     EventImpact,
     RiskLevel,
     backfill_announcements,
     build_announcement_archive,
     classify_title,
     parse_announcement,
+    sync_announcements,
 )
 
 
@@ -209,6 +211,41 @@ class AnnouncementTests(unittest.TestCase):
             self.assertEqual(result["status"], "validated")
             self.assertEqual(result["missing_availability_rows"], 0)
             self.assertEqual(result["pending_availability_rows"], 2)
+
+    def test_sync_rejects_incomplete_reported_pagination(self) -> None:
+        class IncompleteClient:
+            def query_page(
+                self,
+                trade_date: str,
+                *,
+                column: str,
+                page_num: int,
+                page_size: int = 30,
+            ) -> dict[str, object]:
+                return {
+                    "totalpages": 1,
+                    "totalAnnouncement": 2,
+                    "announcements": [
+                        {
+                            "announcementId": f"{column}-1",
+                            "secCode": "300001",
+                            "secName": "测试股份",
+                            "announcementTitle": "测试公告",
+                            "announcementTime": 1_673_020_800_000,
+                            "adjunctUrl": "finalpage/test.pdf",
+                        }
+                    ],
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(CninfoError, "分页不完整"):
+                sync_announcements(
+                    Path(directory),
+                    "20230107",
+                    trade_calendar=["20230109"],
+                    request_delay=0,
+                    client=IncompleteClient(),  # type: ignore[arg-type]
+                )
 
 
 if __name__ == "__main__":

@@ -334,6 +334,7 @@ def build_processed_announcements(
     page_counts: dict[str, int] | None = None,
     *,
     trade_calendar: list[str] | None = None,
+    page_stats: dict[str, dict[str, int | None]] | None = None,
 ) -> dict[str, Any]:
     raw_directory = project / "data" / "raw" / "cninfo" / trade_date
     announcements: dict[str, Announcement] = {}
@@ -384,6 +385,7 @@ def build_processed_announcements(
             else "Unavailable: official trading calendar was not supplied."
         ),
         "page_counts": page_counts or actual_page_counts,
+        "page_stats": page_stats or {},
         "announcement_count": len(ordered),
         "scope_announcement_count": sum(
             item.symbol.startswith(SCOPE_PREFIXES) for item in ordered
@@ -442,6 +444,7 @@ def sync_announcements(
     raw_directory = project / "data" / "raw" / "cninfo" / trade_date
     raw_directory.mkdir(parents=True, exist_ok=True)
     page_counts: dict[str, int] = {}
+    page_stats: dict[str, dict[str, int | None]] = {}
     for column in ("szse", "sse"):
         first = _query_with_retries(
             client,
@@ -467,6 +470,34 @@ def sync_announcements(
                 )
             )
         page_counts[column] = len(pages)
+        raw_rows = sum(
+            len(document.get("announcements") or [])
+            for document in pages
+        )
+        expected_raw = next(
+            (
+                int(first[key])
+                for key in (
+                    "totalAnnouncement",
+                    "totalRecordNum",
+                    "totalRecords",
+                    "total",
+                )
+                if first.get(key) not in (None, "")
+            ),
+            None,
+        )
+        page_stats[column] = {
+            "reported_total": expected_raw,
+            "received_rows": raw_rows,
+            "reported_pages": total_pages,
+            "received_pages": len(pages),
+        }
+        if expected_raw is not None and raw_rows < expected_raw:
+            raise CninfoError(
+                f"{trade_date} {column} 分页不完整："
+                f"reported={expected_raw}，received={raw_rows}"
+            )
         for index, document in enumerate(pages, 1):
             path = raw_directory / f"{column}_{index:04d}.json"
             path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -475,6 +506,7 @@ def sync_announcements(
         trade_date,
         page_counts,
         trade_calendar=trade_calendar,
+        page_stats=page_stats,
     )
 
 
