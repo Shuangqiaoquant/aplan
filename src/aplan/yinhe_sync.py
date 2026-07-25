@@ -1605,6 +1605,7 @@ def main() -> None:
             "reconcile-security-history",
             "benchmarks-ad",
             "fundamentals-ad",
+            "build-fundamentals",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1824,6 +1825,12 @@ def main() -> None:
                 chunk_size=args.chunk_size,
                 overwrite=args.overwrite,
             )
+        elif args.command == "build-fundamentals":
+            from .yinhe_fundamental_snapshots import (
+                build_fundamental_snapshots,
+            )
+
+            result = build_fundamental_snapshots(root)
         elif args.command == "snapshot":
             if not args.date:
                 raise SystemExit("snapshot 必须提供 --date YYYYMMDD")

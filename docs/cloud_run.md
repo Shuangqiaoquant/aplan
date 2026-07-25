@@ -377,6 +377,19 @@ It refuses to start a duplicate process, records the PID under `state/`, and
 filters supplier login tokens from
 `logs/yinhe_fundamentals_20220101_20260722.log`.
 
+After the fact-store manifest reports `validated`, build model-ready snapshots
+without making another supplier request:
+
+```bash
+aplan-yinhe build-fundamentals
+```
+
+The streaming builder writes `fundamental_snapshots.csv` for the existing
+`FundamentalSnapshot` loader and `profit_notice_events.csv` for event research.
+It uses only public consolidated statements and applies corrections on their
+own `usable_from_trade_date`; parent-only, single-quarter, adjusted comparison,
+and vendor-derived unpublished statement types are excluded.
+
 ## Cron Example
 
 Open crontab:
