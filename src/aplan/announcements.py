@@ -430,6 +430,22 @@ def _query_with_retries(
     raise last_error
 
 
+def _reported_total(document: dict[str, Any]) -> int | None:
+    return next(
+        (
+            int(document[key])
+            for key in (
+                "totalAnnouncement",
+                "totalRecordNum",
+                "totalRecords",
+                "total",
+            )
+            if document.get(key) not in (None, "")
+        ),
+        None,
+    )
+
+
 def sync_announcements(
     project: Path,
     trade_date: str,
@@ -454,7 +470,16 @@ def sync_announcements(
             retries=retries,
             retry_delay=retry_delay,
         )
-        total_pages = int(first.get("totalpages") or first.get("totalPages") or 1)
+        reported_pages = int(
+            first.get("totalpages") or first.get("totalPages") or 1
+        )
+        expected_raw = _reported_total(first)
+        count_based_pages = (
+            (expected_raw + 29) // 30
+            if expected_raw is not None
+            else 1
+        )
+        total_pages = max(reported_pages, count_based_pages)
         pages = [first]
         for page_num in range(2, total_pages + 1):
             if request_delay:
@@ -474,23 +499,11 @@ def sync_announcements(
             len(document.get("announcements") or [])
             for document in pages
         )
-        expected_raw = next(
-            (
-                int(first[key])
-                for key in (
-                    "totalAnnouncement",
-                    "totalRecordNum",
-                    "totalRecords",
-                    "total",
-                )
-                if first.get(key) not in (None, "")
-            ),
-            None,
-        )
         page_stats[column] = {
             "reported_total": expected_raw,
             "received_rows": raw_rows,
-            "reported_pages": total_pages,
+            "reported_pages": reported_pages,
+            "requested_pages": total_pages,
             "received_pages": len(pages),
         }
         if expected_raw is not None and raw_rows < expected_raw:

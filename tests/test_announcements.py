@@ -247,6 +247,45 @@ class AnnouncementTests(unittest.TestCase):
                     client=IncompleteClient(),  # type: ignore[arg-type]
                 )
 
+    def test_sync_uses_reported_count_when_page_count_is_too_small(self) -> None:
+        class UnderreportedPagesClient:
+            def query_page(
+                self,
+                trade_date: str,
+                *,
+                column: str,
+                page_num: int,
+                page_size: int = 30,
+            ) -> dict[str, object]:
+                size = 30 if page_num == 1 else 1
+                return {
+                    "totalpages": 1,
+                    "totalAnnouncement": 31,
+                    "announcements": [
+                        {
+                            "announcementId": f"{column}-{page_num}-{index}",
+                            "secCode": "300001",
+                            "secName": "测试股份",
+                            "announcementTitle": "测试公告",
+                            "announcementTime": 1_673_020_800_000,
+                            "adjunctUrl": f"finalpage/{column}-{page_num}-{index}.pdf",
+                        }
+                        for index in range(size)
+                    ],
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = sync_announcements(
+                Path(directory),
+                "20230107",
+                trade_calendar=["20230109"],
+                request_delay=0,
+                client=UnderreportedPagesClient(),  # type: ignore[arg-type]
+            )
+            self.assertEqual(result["page_stats"]["szse"]["reported_pages"], 1)
+            self.assertEqual(result["page_stats"]["szse"]["requested_pages"], 2)
+            self.assertEqual(result["page_stats"]["szse"]["received_rows"], 31)
+
 
 if __name__ == "__main__":
     unittest.main()
