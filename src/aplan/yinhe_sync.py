@@ -1604,6 +1604,7 @@ def main() -> None:
             "security-history-ad",
             "reconcile-security-history",
             "benchmarks-ad",
+            "fundamentals-ad",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1801,6 +1802,27 @@ def main() -> None:
                 end_date=args.end,
                 config=YinheConfig.from_env(args.env_file),
                 refresh_reference=args.refresh_reference,
+            )
+        elif args.command == "fundamentals-ad":
+            if not args.start or not args.end:
+                raise SystemExit(
+                    "fundamentals-ad 必须提供 --start YYYYMMDD 和 --end YYYYMMDD"
+                )
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit(
+                    "fundamentals-ad 必须通过 --symbols 或 --symbols-file 提供股票代码"
+                )
+            from .yinhe_fundamentals import sync_fundamentals
+
+            result = sync_fundamentals(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                symbols=symbols,
+                config=YinheConfig.from_env(args.env_file),
+                chunk_size=args.chunk_size,
+                overwrite=args.overwrite,
             )
         elif args.command == "snapshot":
             if not args.date:

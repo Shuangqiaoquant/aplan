@@ -344,6 +344,28 @@ from constituent intervals and the existing stock daily data.
 Later incremental runs should omit `--refresh-reference`; the command reuses
 the saved master and constituents and fetches only the missing daily tail.
 
+## Yinhe Point-In-Time Fundamentals
+
+Download the minimum historical financial layer required by the fundamental,
+event, and hybrid research profiles:
+
+```bash
+aplan-yinhe fundamentals-ad \
+  --start 20220101 \
+  --end 20260722 \
+  --symbols-file data/processed/yinhe_symbols.txt \
+  --chunk-size 50
+```
+
+The extra 2022 reporting year supports year-over-year features for the 2023
+research start. The SQLite fact store preserves balance sheet, income, cash
+flow, profit express, and profit notice versions separately. `ANN_DATE`,
+`ACTUAL_ANN_DATE`, and a conservative `usable_from_trade_date` are retained;
+facts become usable only on the next official trading day after the source
+announcement date. Checkpoints are scoped to the requested date range, symbol
+pool hash, and chunk size, so rerunning the same command resumes rather than
+redownloading completed chunks.
+
 ## Cron Example
 
 Open crontab:
