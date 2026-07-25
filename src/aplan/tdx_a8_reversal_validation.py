@@ -573,8 +573,9 @@ def _load_candidates(
 
 def _matched_controls(
     bars: sqlite3.Connection,
-    features: sqlite3.Connection,
-    statuses: sqlite3.Connection,
+    day_features: dict[str, sqlite3.Row],
+    signal_states: dict[str, tuple[int, int]],
+    entry_states: dict[str, tuple[int, int]],
     candidate: Candidate,
     entry_date: str,
     exit_dates: dict[int, str],
@@ -597,45 +598,33 @@ def _matched_controls(
         )
         == candidate.industry_code
     ]
-    rows: list[sqlite3.Row] = []
-    for start in range(0, len(members), 800):
-        group = members[start : start + 800]
-        if not group:
-            continue
-        placeholders = ",".join("?" for _ in group)
-        rows.extend(
-            features.execute(
-                f"SELECT * FROM features WHERE trade_date=? "
-                f"AND symbol IN ({placeholders}) "
-                "AND pre20_return IS NOT NULL AND drawdown20 IS NOT NULL "
-                "AND volatility20 IS NOT NULL AND median_turnover20>=?",
-                (
-                    candidate.signal_date,
-                    *group,
-                    MINIMUM_AVERAGE_TURNOVER20,
-                ),
-            ).fetchall()
-        )
     scored: list[tuple[float, str]] = []
-    for row in rows:
+    for symbol in members:
+        row = day_features.get(symbol)
+        if (
+            row is None
+            or row["pre20_return"] is None
+            or row["drawdown20"] is None
+            or row["volatility20"] is None
+            or row["median_turnover20"] is None
+            or float(row["median_turnover20"])
+            < MINIMUM_AVERAGE_TURNOVER20
+        ):
+            continue
         if any(row[variant] for variant in VARIANTS):
             continue
-        state = statuses.execute(
-            "SELECT is_st,is_suspended FROM daily_status "
-            "WHERE trade_date=? AND symbol=?",
-            (candidate.signal_date, row["symbol"]),
-        ).fetchone()
+        state = signal_states.get(symbol)
         if (
             not state
-            or state["is_st"]
-            or state["is_suspended"]
+            or state[0]
+            or state[1]
             or (
-                delisting_dates.get(row["symbol"])
-                and candidate.signal_date >= delisting_dates[row["symbol"]]
+                delisting_dates.get(symbol)
+                and candidate.signal_date >= delisting_dates[symbol]
             )
         ):
             continue
-        listed = listing_dates.get(row["symbol"])
+        listed = listing_dates.get(symbol)
         if (
             not listed
             or _days_listed(listed, candidate.signal_date)
@@ -653,22 +642,18 @@ def _matched_controls(
                 )
             )
         )
-        scored.append((distance, str(row["symbol"])))
+        scored.append((distance, symbol))
     selected: list[str] = []
     for _, symbol in sorted(scored):
-        state = statuses.execute(
-            "SELECT is_st,is_suspended FROM daily_status "
-            "WHERE trade_date=? AND symbol=?",
-            (entry_date, symbol),
-        ).fetchone()
+        state = entry_states.get(symbol)
         entry = bars.execute(
             "SELECT * FROM bars WHERE trade_date=? AND symbol=?",
             (entry_date, symbol),
         ).fetchone()
         if (
             not state
-            or state["is_st"]
-            or state["is_suspended"]
+            or state[0]
+            or state[1]
             or (
                 delisting_dates.get(symbol)
                 and entry_date >= delisting_dates[symbol]
@@ -739,6 +724,35 @@ def _evaluate(
             if signal_index + 1 >= len(dates):
                 continue
             entry_date = dates[signal_index + 1]
+            day_features = {
+                str(row["symbol"]): row
+                for row in features.execute(
+                    "SELECT * FROM features WHERE trade_date=?",
+                    (signal_date,),
+                )
+            }
+            signal_states = {
+                str(row["symbol"]): (
+                    int(row["is_st"]),
+                    int(row["is_suspended"]),
+                )
+                for row in statuses.execute(
+                    "SELECT symbol,is_st,is_suspended FROM daily_status "
+                    "WHERE trade_date=?",
+                    (signal_date,),
+                )
+            }
+            entry_states = {
+                str(row["symbol"]): (
+                    int(row["is_st"]),
+                    int(row["is_suspended"]),
+                )
+                for row in statuses.execute(
+                    "SELECT symbol,is_st,is_suspended FROM daily_status "
+                    "WHERE trade_date=?",
+                    (entry_date,),
+                )
+            }
             exit_dates = {
                 horizon: dates[signal_index + horizon]
                 for horizon in HORIZONS
@@ -751,11 +765,7 @@ def _evaluate(
                     if variant not in selected_variants:
                         continue
                     counters[f"{variant}_signals"] += 1
-                    state = statuses.execute(
-                        "SELECT is_st,is_suspended "
-                        "FROM daily_status WHERE trade_date=? AND symbol=?",
-                        (entry_date, candidate.symbol),
-                    ).fetchone()
+                    state = entry_states.get(candidate.symbol)
                     if not state:
                         counters["missing_entry_security_state"] += 1
                         continue
@@ -765,8 +775,8 @@ def _evaluate(
                         (entry_date, candidate.symbol),
                     ).fetchone()
                     if (
-                        state["is_st"]
-                        or state["is_suspended"]
+                        state[0]
+                        or state[1]
                         or (
                             delisting_dates.get(candidate.symbol)
                             and entry_date >= delisting_dates[candidate.symbol]
@@ -784,8 +794,9 @@ def _evaluate(
                     if controls is None:
                         controls = _matched_controls(
                             bars,
-                            features,
-                            statuses,
+                            day_features,
+                            signal_states,
+                            entry_states,
                             candidate,
                             entry_date,
                             exit_dates,
