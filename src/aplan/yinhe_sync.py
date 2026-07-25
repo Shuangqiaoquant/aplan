@@ -1606,6 +1606,9 @@ def main() -> None:
             "benchmarks-ad",
             "fundamentals-ad",
             "build-fundamentals",
+            "equity-structure-ad",
+            "build-derived-valuations",
+            "accept-derived-valuations",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1831,6 +1834,29 @@ def main() -> None:
             )
 
             result = build_fundamental_snapshots(root)
+        elif args.command == "equity-structure-ad":
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            from .yinhe_derived_valuation import sync_equity_structure
+
+            result = sync_equity_structure(
+                root,
+                symbols=symbols or None,
+                config=YinheConfig.from_env(args.env_file),
+                chunk_size=args.chunk_size,
+                overwrite=args.overwrite,
+            )
+        elif args.command == "build-derived-valuations":
+            from .yinhe_derived_valuation import build_derived_valuations
+
+            result = build_derived_valuations(
+                root,
+                start_date=args.start or "20230101",
+                end_date=args.end or "20251231",
+            )
+        elif args.command == "accept-derived-valuations":
+            from .yinhe_derived_valuation import accept_derived_valuations
+
+            result = accept_derived_valuations(root)
         elif args.command == "snapshot":
             if not args.date:
                 raise SystemExit("snapshot 必须提供 --date YYYYMMDD")

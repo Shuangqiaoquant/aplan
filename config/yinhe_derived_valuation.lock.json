@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "protocol_id": "yinhe_pit_derived_valuation_v1",
+  "version": "1.0.0",
+  "source": "config/yinhe_derived_valuation.toml",
+  "sha256": "8c615cde9046440deaee5c2e7e54b87933a59d9355f2208f6e2d3ba1f9486b0b",
+  "frozen_on": "2026-07-25",
+  "final_holdout_opened": false
+}

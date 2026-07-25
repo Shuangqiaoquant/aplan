@@ -282,7 +282,33 @@ def _load_valuations(
     project: Path,
     aliases: dict[str, str],
 ) -> tuple[dict[str, tuple[list[str], list[tuple[float, float]]]], dict[str, Any]]:
-    root = project / "data" / "processed" / "valuations"
+    root = (
+        project / "data" / "processed" / "yinhe_derived_valuations"
+    )
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        return {}, {
+            "status": "data_unavailable",
+            "reason": "missing_yinhe_derived_valuation_manifest",
+            "path": str(manifest_path),
+            "minimum_required_join_coverage": VALUATION_MINIMUM_COVERAGE,
+        }
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        manifest.get("status") != "validated"
+        or manifest.get("protocol_sha256")
+        != "8c615cde9046440deaee5c2e7e54b87933a59d9355f2208f6e2d3ba1f9486b0b"
+        or manifest.get("coverage_end", "") > AS_OF_TRADE_DATE
+        or manifest.get("2026_rows") != 0
+        or manifest.get("final_holdout_opened") is not False
+    ):
+        return {}, {
+            "status": "data_unavailable",
+            "reason": "yinhe_derived_valuation_manifest_not_accepted",
+            "path": str(manifest_path),
+            "manifest_sha256": _sha256(manifest_path),
+            "minimum_required_join_coverage": VALUATION_MINIMUM_COVERAGE,
+        }
     incoming: dict[str, list[tuple[str, float, float]]] = defaultdict(list)
     source_files: list[Path] = []
     rows_visible = 0
@@ -301,7 +327,7 @@ def _load_valuations(
                         f"估值文件 {path.name} 含研究截止日之后的数据"
                     )
                 symbol = _canonical(str(row.get("symbol") or ""), aliases)
-                pe, pb = _number(row.get("pe")), _number(row.get("pb"))
+                pe, pb = _number(row.get("pe_ttm")), _number(row.get("pb"))
                 if len(symbol) != 6 or not day or pe is None or pb is None:
                     invalid_rows += 1
                     continue
@@ -319,6 +345,13 @@ def _load_valuations(
         first_date = min(first_date or ordered[0][0], ordered[0][0])
         last_date = max(last_date, ordered[-1][0])
     return timelines, {
+        "status": "accepted_source_loaded",
+        "source": "yinhe_pit_derived_valuation_v1",
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": _sha256(manifest_path),
+        "source_protocol_sha256": manifest.get("protocol_sha256"),
+        "daily_files_sha256": manifest.get("daily_files_sha256"),
+        "final_holdout_opened": False,
         "source_files": len(source_files),
         "source_files_sha256": hashlib.sha256(
             "".join(_sha256(path) for path in source_files).encode()

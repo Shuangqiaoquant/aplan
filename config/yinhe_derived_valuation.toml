@@ -1,0 +1,129 @@
+schema_version = 1
+protocol_id = "yinhe_pit_derived_valuation_v1"
+version = "1.0.0"
+status = "frozen_before_build"
+frozen_on = "2026-07-25"
+research_only = true
+final_holdout_opened = false
+
+[coverage]
+start_date = "2023-01-01"
+end_date = "2025-12-31"
+official_trading_days_only = true
+output_grain = "trade_date_x_canonical_security"
+
+[sources]
+raw_unadjusted_close = "data/processed/yinhe_daily"
+adjusted_price_for_valuation = false
+equity_structure_provider = "yinhe:InfoData.get_equity_structure"
+financial_facts = "data/processed/yinhe_fundamentals/financial_facts.sqlite3"
+trade_calendar = "data/processed/trade_calendar.csv"
+security_aliases = "data/processed/security_history/security_aliases.csv"
+tushare_sample_role = "cross_check_only_never_merged"
+
+[equity_structure]
+required_fields = ["CHANGE_DATE", "ANN_DATE", "TOT_SHARE"]
+total_share_unit = "ten_thousand_shares"
+require_positive_total_share = true
+economic_effective_date = "CHANGE_DATE"
+information_available_date = "next_official_trading_day_after_ANN_DATE"
+usable_rule = "both economic_effective_date and information_available_date must be on or before valuation trade_date"
+selection_rule = "latest CHANGE_DATE, then latest ANN_DATE, then deterministic source hash"
+missing_announcement_date = "exclude"
+future_effective_share_count = "forbidden"
+
+[financials]
+availability_field = "usable_from_trade_date"
+statement_scope = "public_consolidated_attributable_to_parent_only"
+corrections = "latest version available as of valuation trade date; affects future dates only"
+net_profit_field = "net_profit"
+equity_field = "equity"
+missing_required_component = "leave derived metric null"
+
+[ttm_net_profit]
+annual_period_suffix = "1231"
+interim_period_suffixes = ["0331", "0630", "0930"]
+annual_formula = "current_available_annual_net_profit"
+interim_formula = "current_ytd_net_profit + prior_available_annual_net_profit - prior_year_same_period_ytd_net_profit"
+require_all_interim_components = true
+single_quarter_reports = "forbidden"
+future_financial_versions = "forbidden"
+
+[formulas]
+total_mv_yuan = "raw_close_cny * total_share_ten_thousand_shares * 10000"
+total_mv_ten_thousand_cny = "total_mv_yuan / 10000"
+pe_ttm = "total_mv_yuan / ttm_attributable_net_profit_yuan"
+pb = "total_mv_yuan / latest_attributable_equity_yuan"
+zero_denominator = "null"
+negative_pe = "preserve_and_flag"
+negative_pb = "preserve_and_flag"
+nonfinite_value = "null_and_flag"
+
+[availability]
+valuation_signal_time = "after_official_market_close_on_trade_date"
+model_entry_time = "next_official_trading_day_open"
+daily_exact_match_required = true
+copy_previous_daily_valuation = false
+state_intervals_may_carry_forward = true
+note = "share and financial states persist only under validated PIT effective intervals; PE/PB themselves are recomputed from each exact day's raw close"
+
+[output]
+root = "data/processed/yinhe_derived_valuations"
+daily_partition = "YYYYMMDD.csv"
+manifest = "manifest.json"
+source_label = "yinhe_pit_derived_valuation_v1"
+fields = [
+  "trade_date",
+  "symbol",
+  "pe_ttm",
+  "pb",
+  "total_mv",
+  "total_mv_yuan",
+  "raw_close",
+  "total_share",
+  "ttm_net_profit",
+  "latest_equity",
+  "share_effective_date",
+  "share_available_date",
+  "profit_available_date",
+  "equity_available_date",
+  "source",
+  "source_hash",
+  "quality_flags",
+]
+total_mv_compatibility_unit = "ten_thousand_cny"
+
+[acceptance]
+maximum_duplicate_keys = 0
+maximum_future_share_rows = 0
+maximum_future_financial_rows = 0
+maximum_nonfinite_output_rows = 0
+minimum_raw_close_join_coverage = 0.98
+minimum_total_share_join_coverage = 0.95
+minimum_total_mv_coverage = 0.95
+minimum_pe_ttm_coverage = 0.80
+minimum_pb_coverage = 0.90
+minimum_daily_eligible_valuation_coverage = 0.95
+coverage_denominator = "point_in_time eligible listed non-ST non-suspended securities with raw close"
+low_coverage_days = "list_and_fail_validation"
+missing_values = "never impute"
+
+[cross_check]
+reference = "data/processed/valuations/20230103.csv"
+minimum_joined_rows = 100
+metrics = [
+  "total_mv_relative_difference",
+  "pe_ttm_relative_difference",
+  "pb_relative_difference",
+]
+role = "diagnostic_only"
+large_difference_action = "report segmented evidence and investigate; never overwrite derived values with reference rows"
+
+[change_control]
+formula_changes_require_new_version = true
+data_source_mix_allowed = false
+industry_valuation_substitution_allowed = false
+default_valuation_score_substitution_allowed = false
+cross_day_valuation_forward_fill_allowed = false
+2026_rows_allowed = false
+
