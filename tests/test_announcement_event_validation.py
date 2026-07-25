@@ -15,6 +15,7 @@ from aplan.announcement_event_validation import (
     _load_events,
     _load_benchmarks,
     _matched_controls,
+    _purged_development_cutoff,
     _return,
 )
 
@@ -240,6 +241,13 @@ class AnnouncementEventValidationTests(unittest.TestCase):
             )
             market, _, _, _, _ = _load_benchmarks(project, {})
         self.assertEqual(market[("000300.SH", "20250102")], (20.0, 21.0))
+
+    def test_development_cutoff_purges_last_sixty_trading_days(self) -> None:
+        dates = [f"2024{index:04d}" for index in range(1, 101)]
+        self.assertEqual(
+            _purged_development_cutoff(dates, "20240100", 60),
+            "20240040",
+        )
 
 
 if __name__ == "__main__":

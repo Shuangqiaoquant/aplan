@@ -45,6 +45,7 @@ MIN_OOS_OBSERVATIONS = 100
 MIN_OOS_COHORTS = 60
 MIN_STABILITY_RATIO = 0.60
 TAIL_LOSS_THRESHOLD = -0.10
+PURGE_TRADING_DAYS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +185,18 @@ def _load_calendar(path: Path) -> list[str]:
             }
         )
     return [day for day in dates if day and day <= AS_OF_TRADE_DATE]
+
+
+def _purged_development_cutoff(
+    dates: list[str],
+    development_end: str = "20241231",
+    purge_trading_days: int = PURGE_TRADING_DAYS,
+) -> str:
+    end_index = bisect.bisect_right(dates, development_end) - 1
+    cutoff_index = end_index - purge_trading_days
+    if end_index < 0 or cutoff_index < 0:
+        raise ValueError("交易日不足，无法执行冻结的训练期 purge")
+    return dates[cutoff_index]
 
 
 def _build_bar_database(
@@ -1176,6 +1189,7 @@ def run_validation(project: Path) -> dict[str, Any]:
         industry_by_symbol,
         industry_members,
     )
+    development_cutoff = _purged_development_cutoff(dates)
     daily_candidate_available = _daily_candidate_available(project)
     variants: dict[str, dict[str, Any]] = {}
     for variant in (
@@ -1191,6 +1205,7 @@ def run_validation(project: Path) -> dict[str, Any]:
                 if row.variant == variant
                 and row.horizon == horizon
                 and row.period == "development"
+                and row.usable_date <= development_cutoff
             ]
             oos = [
                 row for row in observations
@@ -1268,6 +1283,8 @@ def run_validation(project: Path) -> dict[str, Any]:
         }
     model_parameters = {
         "as_of_trade_date": AS_OF_TRADE_DATE,
+        "purge_trading_days": PURGE_TRADING_DAYS,
+        "effective_development_signal_end": development_cutoff,
         "positive_families": sorted(POSITIVE_FAMILIES),
         "negative_families": sorted(NEGATIVE_FAMILIES),
         "horizons": HORIZONS,
@@ -1311,6 +1328,7 @@ def run_validation(project: Path) -> dict[str, Any]:
             "benchmark_hashes": benchmark_hashes,
             "security_state_hashes": security_state_hashes,
             "bar_cache": bar_cache,
+            "effective_development_signal_end": development_cutoff,
             **event_audit,
             "evaluation": evaluation_audit,
         },
@@ -1321,6 +1339,7 @@ def run_validation(project: Path) -> dict[str, Any]:
         "ablation_positive_A_vs_B": ablation,
         "caveats": [
             "2026 final holdout was not opened.",
+            "The final 60 official trading days of 2024 are purged from training.",
             "Matched controls are deterministic nearest neighbors, not tuned.",
             "Missing official or matched benchmarks are reported and never replaced with zero.",
             "Negative cohorts are not short portfolios.",
