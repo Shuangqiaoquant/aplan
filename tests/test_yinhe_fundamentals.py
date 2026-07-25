@@ -6,7 +6,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
-from aplan.yinhe_fundamentals import TABLES, sync_fundamentals
+from aplan.yinhe_fundamentals import TABLES, _market_code, sync_fundamentals
 
 
 def _calendar(project: Path) -> None:
@@ -62,6 +62,12 @@ def _fetch(
 
 
 class YinheFundamentalTests(unittest.TestCase):
+    def test_formats_exchange_suffixes_for_vendor_queries(self) -> None:
+        self.assertEqual(_market_code("600000"), "600000.SH")
+        self.assertEqual(_market_code("688001"), "688001.SH")
+        self.assertEqual(_market_code("000001"), "000001.SZ")
+        self.assertEqual(_market_code("300001"), "300001.SZ")
+
     def test_preserves_versions_and_applies_next_trade_day_availability(self) -> None:
         with TemporaryDirectory() as tmp:
             project = Path(tmp)

@@ -65,6 +65,18 @@ def _symbol(value: Any) -> str:
     return digits[:6] if len(digits) >= 6 else ""
 
 
+def _market_code(value: Any) -> str:
+    symbol = _symbol(value)
+    if not symbol:
+        return ""
+    suffix = (
+        "SH"
+        if symbol.startswith(("600", "601", "603", "605", "688", "689"))
+        else "SZ"
+    )
+    return f"{symbol}.{suffix}"
+
+
 def _field(row: Mapping[str, Any], *names: str) -> Any:
     upper = {str(key).upper(): value for key, value in row.items()}
     for name in names:
@@ -318,8 +330,9 @@ def sync_fundamentals(
             unused_cache: Path,
         ) -> Any:
             method = getattr(info, f"get_{table_name}")
+            vendor_codes = [_market_code(code) for code in codes]
             return method(
-                codes,
+                vendor_codes,
                 local_path=cache_path,
                 is_local=False,
                 begin_date=int(first),
