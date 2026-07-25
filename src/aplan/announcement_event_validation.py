@@ -425,7 +425,7 @@ def _load_benchmarks(
         for row in csv.DictReader(handle):
             day = _date(row.get("trade_date"))
             if day > AS_OF_TRADE_DATE:
-                break
+                continue
             if row.get("index_code") == MARKET_CODE:
                 open_price, close = _number(row.get("open")), _number(row.get("close"))
                 if open_price and close:
@@ -606,6 +606,13 @@ def _matched_controls(
     selected = [symbol for _, symbol in sorted(scored)[:MATCH_COUNT]]
     results: dict[int, list[float]] = defaultdict(list)
     for symbol in selected:
+        security_state = connection.execute(
+            "SELECT is_suspended FROM security_state.daily_status "
+            "WHERE trade_date=? AND symbol=?",
+            (entry_date, symbol),
+        ).fetchone()
+        if not security_state or security_state["is_suspended"]:
+            continue
         entry = _bar(connection, entry_date, symbol)
         if (
             not entry
@@ -705,10 +712,6 @@ def _evaluate(
             counters["missing_usable_or_entry_date"] += 1
             continue
         entry_date = dates[usable_index + 1]
-        entry = _bar(connection, entry_date, signal.symbol)
-        if not entry:
-            counters["missing_entry_bar"] += 1
-            continue
         security_state = connection.execute(
             "SELECT is_st, is_suspended FROM security_state.daily_status "
             "WHERE trade_date=? AND symbol=?",
@@ -719,6 +722,13 @@ def _evaluate(
             continue
         counters["entry_security_state_joined"] += 1
         counters["entry_is_st"] += int(bool(security_state["is_st"]))
+        if security_state["is_suspended"]:
+            counters["untradeable_suspended"] += 1
+            continue
+        entry = _bar(connection, entry_date, signal.symbol)
+        if not entry:
+            counters["missing_entry_bar"] += 1
+            continue
         variants = (
             ["negative_risk_cohort"]
             if signal.direction == "negative"
@@ -737,7 +747,7 @@ def _evaluate(
                 variants.append("positive_event_price_confirmed")
             else:
                 counters["price_confirmation_failed"] += 1
-        if entry["is_suspended"] or security_state["is_suspended"]:
+        if entry["is_suspended"]:
             counters["untradeable_suspended"] += 1
             continue
         if entry["is_limit_up"] and entry["high"] == entry["low"]:

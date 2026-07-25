@@ -13,6 +13,7 @@ from aplan.announcement_event_validation import (
     _apply_training_nomination,
     _gate,
     _load_events,
+    _load_benchmarks,
     _matched_controls,
     _return,
 )
@@ -148,6 +149,16 @@ class AnnouncementEventValidationTests(unittest.TestCase):
     def test_matched_control_requires_pit_industry_membership(self) -> None:
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
+        connection.execute("ATTACH DATABASE ':memory:' AS security_state")
+        connection.execute(
+            """
+            CREATE TABLE security_state.daily_status (
+                trade_date TEXT,
+                symbol TEXT,
+                is_suspended INTEGER
+            )
+            """
+        )
         connection.execute(
             """
             CREATE TABLE bars (
@@ -176,6 +187,13 @@ class AnnouncementEventValidationTests(unittest.TestCase):
             ("20250106", "600002", 9, 9, 9, 9, 100, 10, 0.2, 100, 0, 0),
         ]
         connection.executemany("INSERT INTO bars VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        connection.executemany(
+            "INSERT INTO security_state.daily_status VALUES (?,?,?)",
+            [
+                ("20250103", "600001", 0),
+                ("20250103", "600002", 0),
+            ],
+        )
         controls = _matched_controls(
             connection,
             Signal("600000", "20250102", "share_buyback", "positive"),
@@ -193,6 +211,35 @@ class AnnouncementEventValidationTests(unittest.TestCase):
         _, expected = _return(10, 9)
         self.assertAlmostEqual(controls[1], expected)
         connection.close()
+
+    def test_market_loader_does_not_stop_at_other_index_2026_row(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            root = project / "data" / "processed" / "benchmarks"
+            root.mkdir(parents=True)
+            (root / "manifest.json").write_text(
+                '{"status":"validated","coverage_end":"20251231",'
+                '"point_in_time_constituents":true,"hashes":{}}',
+                encoding="utf-8",
+            )
+            (root / "market_indices.csv").write_text(
+                "index_code,trade_date,open,close\n"
+                "000001.SH,20260102,10,10\n"
+                "000300.SH,20250102,20,21\n",
+                encoding="utf-8",
+            )
+            (root / "industry_daily.csv").write_text(
+                "index_code,trade_date,open,close\n"
+                "801010.SI,20250102,10,10\n",
+                encoding="utf-8",
+            )
+            (root / "industry_constituents.csv").write_text(
+                "index_code,symbol,in_date,out_date\n"
+                "801010.SI,600000,20230101,\n",
+                encoding="utf-8",
+            )
+            market, _, _, _, _ = _load_benchmarks(project, {})
+        self.assertEqual(market[("000300.SH", "20250102")], (20.0, 21.0))
 
 
 if __name__ == "__main__":
