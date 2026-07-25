@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "protocol_id": "trend_monitor_v0_1",
+  "version": "0.1.0",
+  "source": "config/trend_monitor_validation.toml",
+  "sha256": "3c4fc72624e3802a3e02864c003cf502de05e8a355b4f0b4f9f112693c80a814",
+  "frozen_on": "2026-07-25",
+  "final_holdout_opened": false
+}

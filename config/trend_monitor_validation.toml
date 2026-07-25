@@ -1,0 +1,128 @@
+schema_version = 1
+protocol_id = "trend_monitor_v0_1"
+version = "0.1.0"
+status = "frozen_first_pass"
+frozen_on = "2026-07-25"
+research_only = true
+final_holdout_opened = false
+
+[time_design]
+development_start = "2023-01-01"
+development_end = "2024-12-31"
+rolling_oos_start = "2025-01-01"
+rolling_oos_end = "2025-12-31"
+research_as_of_trade_date = "20251231"
+purge_trading_days = 60
+
+[universe]
+point_in_time_security_state_required = true
+canonical_alias_file = "data/processed/security_history/security_aliases.csv"
+minimum_listing_days = 120
+listing_days_interpretation = "calendar_days_matching_current_model"
+exclude_st = true
+exclude_suspended_signal = true
+exclude_limit_up_or_down_signal = true
+minimum_average_turnover_previous_20d = 50000000
+
+[signal]
+signal_time = "completed_daily_close"
+entry = "next_trading_day_open"
+breakout_lookback = 20
+volume_baseline = "mean_previous_5_completed_days"
+minimum_volume_ratio = 1.5
+pullback_tolerance = 0.02
+
+[variants.B1_volume_breakout]
+definition = "close_above_prior_20d_high_and_close_ge_ma20_and_ma20_non_decreasing_and_volume_ratio_ge_1_5"
+
+[variants.B2_ma20_pullback]
+definition = "close_gt_ma20_gt_ma60_and_ma20_rising_and_low_within_2pct_ma20_and_close_ge_open"
+
+[variants.B3_ma5_cross_ma20]
+definition = "previous_ma5_le_previous_ma20_and_current_ma5_gt_current_ma20_and_close_gt_ma60"
+
+[variants.combined_top5]
+candidate_count = 5
+score_base = 45
+score_B1 = 22
+score_B2 = 18
+score_B3 = 15
+score_trend_alignment = 8
+score_volume_confirmation_max = 7
+ranking = "score_desc_then_symbol"
+
+[rebalance]
+step_trading_days = 5
+multiple_start_offsets = [0, 1, 2, 3, 4]
+rule_axis_weighting = "one_equal_weight_signal_per_symbol_date_rule"
+portfolio_weighting = "equal_weight_top5"
+
+[tradability]
+exclude_suspended_entry = true
+exclude_one_price_limit_up_entry = true
+report_untradeable_separately = true
+
+[horizons]
+evaluation_days = [1, 5, 10, 20, 40, 60]
+selection_rule = "training may nominate a stable horizon; 2025 may only accept or reject it"
+
+[costs]
+commission_rate_each_side = 0.0003
+slippage_rate_each_side = 0.001
+stamp_tax_rate_sell = 0.0005
+minimum_commission_mode = "sensitivity_only"
+report_gross_and_net = true
+
+[benchmarks]
+market = "official_market_index"
+industry = "point_in_time_shenwan_level_1"
+matched_control = "same_date_same_industry_similar_pretrend_and_liquidity_non_signal"
+fallback_rule = "missing benchmark or control is reported and never replaced with zero"
+
+[market_regimes]
+source = "official_market_index_only"
+dimensions = ["trend", "volatility"]
+minimum_regime_sample_count = 30
+
+[metrics]
+return_metrics = [
+  "mean",
+  "median",
+  "win_rate",
+  "p05",
+  "p25",
+  "p75",
+  "p95",
+  "tail_loss_rate",
+  "max_drawdown",
+  "turnover",
+]
+coverage_metrics = [
+  "signals",
+  "canonical_securities",
+  "cohorts",
+  "security_state_join_coverage",
+  "industry_join_coverage",
+  "matched_control_coverage",
+  "untradeable_rate",
+]
+excess_comparisons = ["market", "industry", "matched_control"]
+
+[first_pass_gate]
+minimum_oos_observations = 100
+minimum_oos_cohorts = 60
+minimum_positive_rolling_window_ratio = 0.60
+minimum_positive_market_regime_ratio = 0.60
+minimum_median_net_excess_return = 0.0
+maximum_drawdown = 0.25
+decision = "each rule axis and combined portfolio must pass independently"
+
+[change_control]
+parameter_search_allowed = false
+stop_loss_allowed = false
+fundamental_inputs_allowed = false
+announcement_inputs_allowed = false
+news_inputs_allowed = false
+automatic_weight_change = false
+human_confirmation_required = true
+
