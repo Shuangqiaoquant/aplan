@@ -297,6 +297,7 @@ class AnnouncementTests(unittest.TestCase):
                 "20230107",
                 trade_calendar=["20230109"],
                 request_delay=0,
+                page_size=30,
                 client=UnderreportedPagesClient(),  # type: ignore[arg-type]
             )
             self.assertEqual(result["page_stats"]["szse"]["reported_pages"], 1)

@@ -419,6 +419,7 @@ def _query_with_retries(
     page_num: int,
     retries: int,
     retry_delay: float,
+    page_size: int,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
@@ -427,6 +428,7 @@ def _query_with_retries(
                 trade_date,
                 column=column,
                 page_num=page_num,
+                page_size=page_size,
             )
         except CninfoError as exc:
             last_error = exc
@@ -460,6 +462,7 @@ def sync_announcements(
     retries: int = 3,
     retry_delay: float = 5,
     request_delay: float = 0.2,
+    page_size: int = 100,
     client: CninfoClient | None = None,
 ) -> dict[str, Any]:
     client = client or CninfoClient()
@@ -475,13 +478,14 @@ def sync_announcements(
             page_num=1,
             retries=retries,
             retry_delay=retry_delay,
+            page_size=page_size,
         )
         reported_pages = int(
             first.get("totalpages") or first.get("totalPages") or 1
         )
         expected_raw = _reported_total(first)
         count_based_pages = (
-            (expected_raw + 29) // 30
+            (expected_raw + page_size - 1) // page_size
             if expected_raw is not None
             else 1
         )
@@ -498,6 +502,7 @@ def sync_announcements(
                     page_num=page_num,
                     retries=retries,
                     retry_delay=retry_delay,
+                    page_size=page_size,
                 )
             )
         page_counts[column] = len(pages)
@@ -662,6 +667,7 @@ def backfill_announcements(
     retry_delay: float = 5,
     request_delay: float = 0.2,
     day_delay: float = 0.5,
+    page_size: int = 100,
     overwrite: bool = False,
     client: CninfoClient | None = None,
 ) -> dict[str, Any]:
@@ -685,6 +691,7 @@ def backfill_announcements(
                 retries=retries,
                 retry_delay=retry_delay,
                 request_delay=request_delay,
+                page_size=page_size,
                 client=client,
             )
             completed += 1
@@ -735,6 +742,7 @@ def main() -> None:
     parser.add_argument("--retry-delay", type=float, default=5)
     parser.add_argument("--request-delay", type=float, default=0.2)
     parser.add_argument("--day-delay", type=float, default=0.5)
+    parser.add_argument("--page-size", type=int, default=100)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     project = Path(args.root).resolve()
@@ -753,6 +761,7 @@ def main() -> None:
             retries=args.retries,
             retry_delay=args.retry_delay,
             request_delay=args.request_delay,
+            page_size=args.page_size,
         )
     elif args.command == "rebuild":
         if not args.date:
@@ -791,6 +800,7 @@ def main() -> None:
             retry_delay=args.retry_delay,
             request_delay=args.request_delay,
             day_delay=args.day_delay,
+            page_size=args.page_size,
             overwrite=args.overwrite,
         )
     if args.command in {"backfill", "build-archive"}:

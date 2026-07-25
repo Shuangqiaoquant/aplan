@@ -27,6 +27,7 @@ nohup env PYTHONUNBUFFERED=1 \
   --calendar-file "$ROOT/data/processed/trade_calendar.csv" \
   --retries 5 \
   --retry-delay 10 \
+  --page-size 100 \
   --request-delay 0.3 \
   --day-delay 0.5 \
   >>"$LOG_FILE" 2>&1 </dev/null &
