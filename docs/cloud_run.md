@@ -323,6 +323,27 @@ Do not add `--open-final-holdout` during model development. That option is
 reserved for the one-time final evaluation after the baseline definition and
 all strict-data checks are frozen.
 
+## Yinhe Market And Industry Benchmarks
+
+Download the compact official benchmark layer after daily prices and historical
+security states are ready:
+
+```bash
+aplan-yinhe benchmarks-ad \
+  --start 20230101 \
+  --end 20260722 \
+  --refresh-reference
+```
+
+This stores nine core market indices, the published Shenwan level-1 industry
+index master, point-in-time constituent intervals, and industry-index daily
+prices under `data/processed/benchmarks/`. Daily constituent weights are
+intentionally omitted because equal-weight industry benchmarks can be rebuilt
+from constituent intervals and the existing stock daily data.
+
+Later incremental runs should omit `--refresh-reference`; the command reuses
+the saved master and constituents and fetches only the missing daily tail.
+
 ## Cron Example
 
 Open crontab:

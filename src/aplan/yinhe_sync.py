@@ -1603,6 +1603,7 @@ def main() -> None:
             "build-adjustment",
             "security-history-ad",
             "reconcile-security-history",
+            "benchmarks-ad",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1631,6 +1632,11 @@ def main() -> None:
         "--overwrite",
         action="store_true",
         help="强制覆盖已存在数据；backfill-range 同时忽略检查点并重新查询",
+    )
+    parser.add_argument(
+        "--refresh-reference",
+        action="store_true",
+        help="benchmarks-ad 重新获取行业基础信息和历史成分",
     )
     parser.add_argument("--level-type", type=int, default=1, help="快照 Level 类型，默认 1")
     parser.add_argument("--begin-time", type=int, default=0, help="查询开始时间，默认 0；可试 93000000")
@@ -1781,6 +1787,20 @@ def main() -> None:
                 root,
                 start_date=args.start,
                 end_date=args.end,
+            )
+        elif args.command == "benchmarks-ad":
+            if not args.start or not args.end:
+                raise SystemExit(
+                    "benchmarks-ad 必须提供 --start YYYYMMDD 和 --end YYYYMMDD"
+                )
+            from .yinhe_benchmarks import sync_benchmarks
+
+            result = sync_benchmarks(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                config=YinheConfig.from_env(args.env_file),
+                refresh_reference=args.refresh_reference,
             )
         elif args.command == "snapshot":
             if not args.date:
