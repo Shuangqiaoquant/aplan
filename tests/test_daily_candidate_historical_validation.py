@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from aplan.daily_candidate_historical_validation import (
     OFFSETS,
     PROTOCOL_SHA256,
     VALUATION_DEPENDENT,
+    _ExactValuationStore,
     _exact_timeline_at,
     _factor_snapshot,
     _market_and_industry_caps,
@@ -19,6 +21,30 @@ from aplan.daily_candidate_historical_validation import (
 
 
 class DailyCandidateHistoricalValidationTests(unittest.TestCase):
+    def test_valuation_store_loads_one_exact_day_at_a_time(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for day, pe in (("20230103", 10.0), ("20230104", 11.0)):
+                with (root / f"{day}.csv").open(
+                    "w", encoding="utf-8", newline=""
+                ) as handle:
+                    writer = csv.DictWriter(
+                        handle,
+                        fieldnames=("trade_date", "symbol", "pe_ttm", "pb"),
+                    )
+                    writer.writeheader()
+                    writer.writerow({
+                        "trade_date": day,
+                        "symbol": "600000",
+                        "pe_ttm": pe,
+                        "pb": 1.5,
+                    })
+            store = _ExactValuationStore(root, {})
+
+            self.assertEqual(store.for_day("20230103")["600000"], (10.0, 1.5))
+            self.assertEqual(store.for_day("20230104")["600000"], (11.0, 1.5))
+            self.assertEqual(store._cached_day, "20230104")
+
     def test_protocol_fallback_keeps_2026_sealed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             protocol = _protocol(Path(directory))

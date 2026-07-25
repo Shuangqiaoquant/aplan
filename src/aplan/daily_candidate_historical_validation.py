@@ -278,16 +278,52 @@ def _exact_timeline_at(
     return values[index] if index < len(dates) and dates[index] == day else None
 
 
+class _ExactValuationStore:
+    def __init__(
+        self,
+        root: Path,
+        aliases: dict[str, str],
+    ) -> None:
+        self.root = root
+        self.aliases = aliases
+        self._cached_day = ""
+        self._cached: dict[str, tuple[float, float]] = {}
+
+    def for_day(self, day: str) -> dict[str, tuple[float, float]]:
+        if day == self._cached_day:
+            return self._cached
+        if day > AS_OF_TRADE_DATE:
+            raise AssertionError("2026 估值进入 daily_candidate 冻结验证")
+        path = self.root / f"{day}.csv"
+        values: dict[str, tuple[float, float]] = {}
+        if path.exists():
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    row_day = _date(row.get("trade_date") or day)
+                    if row_day != day:
+                        raise ValueError(f"估值文件 {path.name} 日期键错误")
+                    symbol = _canonical(
+                        str(row.get("symbol") or ""), self.aliases
+                    )
+                    pe = _number(row.get("pe_ttm"))
+                    pb = _number(row.get("pb"))
+                    if len(symbol) == 6 and pe is not None and pb is not None:
+                        values[symbol] = (float(pe), float(pb))
+        self._cached_day = day
+        self._cached = values
+        return values
+
+
 def _load_valuations(
     project: Path,
     aliases: dict[str, str],
-) -> tuple[dict[str, tuple[list[str], list[tuple[float, float]]]], dict[str, Any]]:
+) -> tuple[_ExactValuationStore, dict[str, Any]]:
     root = (
         project / "data" / "processed" / "yinhe_derived_valuations"
     )
     manifest_path = root / "manifest.json"
     if not manifest_path.exists():
-        return {}, {
+        return _ExactValuationStore(root, aliases), {
             "status": "data_unavailable",
             "reason": "missing_yinhe_derived_valuation_manifest",
             "path": str(manifest_path),
@@ -302,49 +338,22 @@ def _load_valuations(
         or manifest.get("2026_rows") != 0
         or manifest.get("final_holdout_opened") is not False
     ):
-        return {}, {
+        return _ExactValuationStore(root, aliases), {
             "status": "data_unavailable",
             "reason": "yinhe_derived_valuation_manifest_not_accepted",
             "path": str(manifest_path),
             "manifest_sha256": _sha256(manifest_path),
             "minimum_required_join_coverage": VALUATION_MINIMUM_COVERAGE,
         }
-    incoming: dict[str, list[tuple[str, float, float]]] = defaultdict(list)
-    source_files: list[Path] = []
-    rows_visible = 0
+    source_files = [
+        path for path in sorted(root.glob("20??????.csv"))
+        if path.stem <= AS_OF_TRADE_DATE
+    ]
     rows_after_cutoff = 0
-    invalid_rows = 0
-    for path in sorted(root.glob("20??????.csv")):
+    for path in root.glob("20??????.csv"):
         if path.stem > AS_OF_TRADE_DATE:
             rows_after_cutoff += 1
-            continue
-        source_files.append(path)
-        with path.open(encoding="utf-8-sig", newline="") as handle:
-            for row in csv.DictReader(handle):
-                day = _date(row.get("trade_date") or path.stem)
-                if day > AS_OF_TRADE_DATE:
-                    raise ValueError(
-                        f"估值文件 {path.name} 含研究截止日之后的数据"
-                    )
-                symbol = _canonical(str(row.get("symbol") or ""), aliases)
-                pe, pb = _number(row.get("pe_ttm")), _number(row.get("pb"))
-                if len(symbol) != 6 or not day or pe is None or pb is None:
-                    invalid_rows += 1
-                    continue
-                incoming[symbol].append((day, float(pe), float(pb)))
-                rows_visible += 1
-    timelines: dict[str, tuple[list[str], list[tuple[float, float]]]] = {}
-    first_date = ""
-    last_date = ""
-    for symbol, items in incoming.items():
-        ordered = sorted(items)
-        timelines[symbol] = (
-            [item[0] for item in ordered],
-            [(item[1], item[2]) for item in ordered],
-        )
-        first_date = min(first_date or ordered[0][0], ordered[0][0])
-        last_date = max(last_date, ordered[-1][0])
-    return timelines, {
+    return _ExactValuationStore(root, aliases), {
         "status": "accepted_source_loaded",
         "source": "yinhe_pit_derived_valuation_v1",
         "manifest_path": str(manifest_path),
@@ -353,15 +362,13 @@ def _load_valuations(
         "daily_files_sha256": manifest.get("daily_files_sha256"),
         "final_holdout_opened": False,
         "source_files": len(source_files),
-        "source_files_sha256": hashlib.sha256(
-            "".join(_sha256(path) for path in source_files).encode()
-        ).hexdigest(),
-        "rows_visible_through_20251231": rows_visible,
+        "source_files_sha256": manifest.get("daily_files_sha256"),
+        "rows_visible_through_20251231": manifest.get("rows", 0),
         "source_files_after_cutoff_not_opened": rows_after_cutoff,
-        "invalid_rows": invalid_rows,
-        "symbols": len(timelines),
-        "first_date": first_date or None,
-        "last_date": last_date or None,
+        "invalid_rows": manifest.get("nonfinite_output_rows", 0),
+        "symbols": None,
+        "first_date": manifest.get("coverage_start"),
+        "last_date": manifest.get("coverage_end"),
         "minimum_required_join_coverage": VALUATION_MINIMUM_COVERAGE,
     }
 
@@ -480,7 +487,7 @@ def _scan_candidates(
     security_database: Path,
     listing_dates: dict[str, str],
     pit_industries: dict[str, list[tuple[str, str, str]]],
-    valuations: dict[str, tuple[list[str], list[tuple[float, float]]]],
+    valuations: _ExactValuationStore,
     fundamentals: dict[str, tuple[list[str], list[Any]]],
     announcements: dict[str, tuple[list[str], list[float]]],
 ) -> tuple[dict[str, dict[str, list[Candidate]]], dict[str, Any]]:
@@ -530,6 +537,7 @@ def _scan_candidates(
                         )
                     histories[symbol].append((float(close), float(turnover)))
             price_parts = _score_parts(current)
+            valuations_for_day = valuations.for_day(signal_date)
             eligible_parts: dict[str, tuple[float, float, float, float]] = {}
             industries: dict[str, str] = {}
             for symbol, parts in price_parts.items():
@@ -587,9 +595,7 @@ def _scan_candidates(
                 ],
             ] = {}
             for symbol in eligible_parts:
-                valuation = _exact_timeline_at(
-                    valuations.get(symbol), signal_date
-                )
+                valuation = valuations_for_day.get(symbol)
                 valuation_score = None
                 if valuation is not None:
                     audit["valuation_joined"] += 1
