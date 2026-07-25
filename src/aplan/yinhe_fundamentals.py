@@ -279,6 +279,7 @@ def sync_fundamentals(
     config: Any | None = None,
     chunk_size: int = 50,
     overwrite: bool = False,
+    tables: Iterable[str] | None = None,
     fetcher: Callable[[str, list[str], str, str, Path], Any] | None = None,
 ) -> dict[str, Any]:
     start, end = _date(start_date), _date(end_date)
@@ -287,6 +288,13 @@ def sync_fundamentals(
     cleaned = sorted({symbol for value in symbols if (symbol := _symbol(value))})
     if not cleaned:
         raise ValueError("银河财务数据缺少股票代码")
+    selected_tables = tuple(tables or TABLES)
+    if (
+        not selected_tables
+        or len(set(selected_tables)) != len(selected_tables)
+        or any(table not in TABLES for table in selected_tables)
+    ):
+        raise ValueError("银河财务数据请求表无效")
     chunk_size = max(1, chunk_size)
     calendar = _calendar(project)
     database = (
@@ -355,7 +363,7 @@ def sync_fundamentals(
                 continue
             counts: dict[str, int] = {}
             with connection:
-                for table_name in TABLES:
+                for table_name in selected_tables:
                     value = fetcher(table_name, codes, start, end, cache)
                     rows = _normalize(
                         table_name, value, calendar, downloaded_at
@@ -423,7 +431,7 @@ def sync_fundamentals(
     status = (
         "validated"
         if completed == len(chunks)
-        and all(counts_by_table.get(table, 0) > 0 for table in TABLES)
+        and all(counts_by_table.get(table, 0) > 0 for table in selected_tables)
         and invalid_timing == 0
         else "failed_validation"
     )
@@ -434,6 +442,7 @@ def sync_fundamentals(
         "provider": "China Galaxy AmazingData",
         "coverage_reporting_period_start": start,
         "coverage_reporting_period_end": end,
+        "requested_tables": list(selected_tables),
         "symbols": len(cleaned),
         "symbol_pool_sha256": pool_hash,
         "chunks": len(chunks),

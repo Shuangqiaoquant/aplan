@@ -1605,6 +1605,7 @@ def main() -> None:
             "reconcile-security-history",
             "benchmarks-ad",
             "fundamentals-ad",
+            "valuation-financial-history-ad",
             "build-fundamentals",
             "equity-structure-ad",
             "build-derived-valuations",
@@ -1827,6 +1828,28 @@ def main() -> None:
                 config=YinheConfig.from_env(args.env_file),
                 chunk_size=args.chunk_size,
                 overwrite=args.overwrite,
+            )
+        elif args.command == "valuation-financial-history-ad":
+            if not args.start or not args.end:
+                raise SystemExit(
+                    "valuation-financial-history-ad 必须提供 --start 和 --end"
+                )
+            symbols = _read_symbols(args.symbols, args.symbols_file)
+            if not symbols:
+                raise SystemExit(
+                    "valuation-financial-history-ad 必须提供股票代码"
+                )
+            from .yinhe_fundamentals import sync_fundamentals
+
+            result = sync_fundamentals(
+                root,
+                start_date=args.start,
+                end_date=args.end,
+                symbols=symbols,
+                config=YinheConfig.from_env(args.env_file),
+                chunk_size=args.chunk_size,
+                overwrite=args.overwrite,
+                tables=("balance_sheet", "income"),
             )
         elif args.command == "build-fundamentals":
             from .yinhe_fundamental_snapshots import (

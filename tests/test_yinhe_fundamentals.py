@@ -62,6 +62,38 @@ def _fetch(
 
 
 class YinheFundamentalTests(unittest.TestCase):
+    def test_can_download_only_valuation_required_tables(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            _calendar(project)
+            calls: list[str] = []
+
+            def fetch(
+                table_name: str,
+                codes: list[str],
+                start: str,
+                end: str,
+                cache: Path,
+            ) -> list[dict[str, object]]:
+                calls.append(table_name)
+                return _fetch(table_name, codes, start, end, cache)
+
+            result = sync_fundamentals(
+                project,
+                start_date="20210101",
+                end_date="20231231",
+                symbols=["600000"],
+                chunk_size=1,
+                tables=("balance_sheet", "income"),
+                fetcher=fetch,
+            )
+
+            self.assertEqual(calls, ["balance_sheet", "income"])
+            self.assertEqual(
+                result["requested_tables"], ["balance_sheet", "income"]
+            )
+            self.assertEqual(result["status"], "validated")
+
     def test_formats_exchange_suffixes_for_vendor_queries(self) -> None:
         self.assertEqual(_market_code("600000"), "600000.SH")
         self.assertEqual(_market_code("688001"), "688001.SH")
