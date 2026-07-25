@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import csv
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from aplan.announcements import (
     Announcement,
     EventImpact,
     RiskLevel,
+    backfill_announcements,
+    build_announcement_archive,
     classify_title,
     parse_announcement,
 )
@@ -66,6 +72,143 @@ class AnnouncementTests(unittest.TestCase):
         event = classify_title(announcement)
         self.assertEqual(event.event_type, "compliance_statement")
         self.assertEqual(event.impact_hint, EventImpact.NEUTRAL)
+
+    def test_backfill_includes_calendar_days_and_sets_next_trade_day(self) -> None:
+        class FakeClient:
+            def query_page(
+                self,
+                trade_date: str,
+                *,
+                column: str,
+                page_num: int,
+                page_size: int = 30,
+            ) -> dict[str, object]:
+                rows = []
+                if trade_date == "20230107" and column == "szse":
+                    rows = [
+                        {
+                            "announcementId": "weekend-1",
+                            "secCode": "300001",
+                            "secName": "测试股份",
+                            "announcementTitle": "关于回购股份的公告",
+                            "announcementTime": 1_673_020_800_000,
+                            "adjunctUrl": "finalpage/test.pdf",
+                        }
+                    ]
+                return {
+                    "totalpages": 1,
+                    "announcements": rows,
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            calendar = project / "data" / "processed" / "trade_calendar.csv"
+            calendar.parent.mkdir(parents=True)
+            with calendar.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["trade_date"])
+                writer.writerows([["20230106"], ["20230109"], ["20230110"]])
+            result = backfill_announcements(
+                project,
+                start="20230107",
+                end="20230108",
+                calendar_file=calendar,
+                request_delay=0,
+                day_delay=0,
+                client=FakeClient(),  # type: ignore[arg-type]
+            )
+            self.assertEqual(result["completed"], 2)
+            document = json.loads(
+                (
+                    project
+                    / "data"
+                    / "processed"
+                    / "announcements"
+                    / "20230107.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                document["announcements"][0]["usable_from_trade_date"],
+                "20230109",
+            )
+            self.assertEqual(result["archive"]["status"], "validated")
+
+    def test_archive_deduplicates_repeated_announcement_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            source = project / "data" / "processed" / "announcements"
+            source.mkdir(parents=True)
+            row = {
+                "announcement_id": "a1",
+                "symbol": "600000",
+                "company_name": "浦发银行",
+                "title": "测试公告",
+                "published_at": "2023-01-03T00:00:00+00:00",
+                "usable_from_trade_date": "20230104",
+                "source_url": "https://example.test/a.pdf",
+                "source": "cninfo",
+            }
+            event = {
+                "announcement_id": "a1",
+                "symbol": "600000",
+                "published_at": row["published_at"],
+                "usable_from_trade_date": "20230104",
+                "event_type": "other",
+                "impact_hint": "unknown",
+                "risk_level": "low",
+                "confidence": 0.3,
+                "summary": "测试",
+                "source_url": row["source_url"],
+                "requires_fulltext": True,
+                "analyzer": "title_rules_v1",
+            }
+            for day in ("20230103", "20230104"):
+                (source / f"{day}.json").write_text(
+                    json.dumps(
+                        {"announcements": [row], "events": [event]},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            result = build_announcement_archive(
+                project,
+                start="20230103",
+                end="20230104",
+            )
+            self.assertEqual(result["announcements"], 1)
+            self.assertEqual(result["events"], 1)
+            self.assertEqual(result["duplicate_announcements_skipped"], 1)
+            self.assertEqual(result["duplicate_events_skipped"], 1)
+
+    def test_archive_treats_calendar_right_edge_as_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            source = project / "data" / "processed" / "announcements"
+            source.mkdir(parents=True)
+            row = {
+                "announcement_id": "edge-1",
+                "symbol": "600000",
+                "published_at": "2026-07-24T12:00:00+08:00",
+                "usable_from_trade_date": "",
+            }
+            (source / "20260724.json").write_text(
+                json.dumps(
+                    {
+                        "announcements": [row],
+                        "events": [row],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = build_announcement_archive(
+                project,
+                start="20260724",
+                end="20260724",
+                trade_calendar=["20260724"],
+            )
+            self.assertEqual(result["status"], "validated")
+            self.assertEqual(result["missing_availability_rows"], 0)
+            self.assertEqual(result["pending_availability_rows"], 2)
 
 
 if __name__ == "__main__":

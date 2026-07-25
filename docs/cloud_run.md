@@ -390,6 +390,31 @@ It uses only public consolidated statements and applies corrections on their
 own `usable_from_trade_date`; parent-only, single-quarter, adjusted comparison,
 and vendor-derived unpublished statement types are excluded.
 
+## Historical Legal Announcements
+
+Galaxy AmazingData does not expose the ordinary listed-company announcement
+catalog or announcement PDFs. Use the official Cninfo adapter as the legal
+announcement source and keep Galaxy for structured market and financial data.
+
+Start the resumable calendar-day backfill on the cloud server:
+
+```bash
+bash scripts/start_cloud_cninfo_announcements.sh
+```
+
+Calendar days are intentional: announcements released on weekends and holidays
+must not be omitted. Each event receives a conservative
+`usable_from_trade_date` equal to the next official trading day after its
+announcement date. The job writes daily raw and processed evidence plus:
+
+- `data/processed/announcements/announcement_index.csv`
+- `data/processed/announcements/event_index.csv`
+- `data/processed/announcements/manifest.json`
+
+The full PDF archive is not downloaded during backfill. Download and hash only
+the high-risk or research-selected PDFs later, which keeps storage and network
+use bounded.
+
 ## Cron Example
 
 Open crontab:
