@@ -1,0 +1,183 @@
+schema_version = 1
+protocol_id = "daily_candidate_v0_1_historical_replay"
+version = "0.1.0"
+status = "frozen_first_pass"
+frozen_on = "2026-07-25"
+research_only = true
+final_holdout_opened = false
+
+[time_design]
+development_start = "2023-01-01"
+development_end = "2024-12-31"
+rolling_oos_start = "2025-01-01"
+rolling_oos_end = "2025-12-31"
+research_as_of_trade_date = "20251231"
+purge_trading_days = 60
+
+[universe]
+point_in_time_security_state_required = true
+canonical_alias_file = "data/processed/security_history/security_aliases.csv"
+minimum_listing_days = 120
+listing_days_interpretation = "calendar_days_matching_current_model"
+exclude_st = true
+exclude_delisting_risk = true
+exclude_suspended_signal = true
+minimum_average_turnover_previous_20d = 50000000
+
+[score]
+normalization = "same_date_cross_sectional_percentile"
+momentum_lookback = 20
+turnover_trend_lookback = 20
+volatility_lookback = 20
+relative_strength_weight = 30
+low_volatility_weight = 20
+liquidity_flow_weight = 15
+quality_catalyst_constant = 5
+valuation_default_constant = 3
+execution_fit_constant = 7
+candidate_count = 5
+ranking = "score_desc_then_symbol"
+
+[valuation]
+point_in_time_required = true
+positive_pe_pb_only = true
+pe_breaks = [15, 35, 60]
+pe_scores = [5.0, 3.5, 1.5, 0.5]
+pb_breaks = [1.5, 3.0, 8.0]
+pb_scores = [5.0, 3.5, 1.5, 0.5]
+nonpositive_score = 2.0
+
+[caps]
+critical_announcement = 49
+high_risk_announcement = 64
+negative_or_mixed_announcement = 74
+two_or_more_fundamental_risks = 64
+one_fundamental_risk = 74
+stress_market = 64
+weak_market = 74
+bottom_30_percent_industry = 74
+
+[fundamental_risks]
+net_profit_growth_below = -0.30
+operating_cashflow_to_profit_below = 0.0
+debt_to_assets_above = 0.75
+positive_fundamental_score_enabled = false
+
+[variants.price_score_only]
+valuation = false
+market_regime_cap = false
+industry_cap = false
+fundamental_cap = false
+announcement_cap = false
+
+[variants.full_current_model]
+valuation = true
+market_regime_cap = true
+industry_cap = true
+fundamental_cap = true
+announcement_cap = true
+
+[variants.no_valuation]
+parent = "full_current_model"
+valuation = false
+
+[variants.no_market_regime_cap]
+parent = "full_current_model"
+market_regime_cap = false
+
+[variants.no_industry_cap]
+parent = "full_current_model"
+industry_cap = false
+
+[variants.no_fundamental_cap]
+parent = "full_current_model"
+fundamental_cap = false
+
+[variants.no_announcement_cap]
+parent = "full_current_model"
+announcement_cap = false
+
+[rebalance]
+step_trading_days = 5
+multiple_start_offsets = [0, 1, 2, 3, 4]
+portfolio_weighting = "equal_weight_top5"
+signal_time = "completed_daily_close"
+entry = "next_trading_day_open"
+
+[tradability]
+exclude_suspended_entry = true
+exclude_one_price_limit_up_entry = true
+report_untradeable_separately = true
+
+[horizons]
+evaluation_days = [1, 5, 10, 20, 40, 60]
+selection_rule = "training may nominate a stable horizon; 2025 may only accept or reject it"
+
+[costs]
+commission_rate_each_side = 0.0003
+slippage_rate_each_side = 0.001
+stamp_tax_rate_sell = 0.0005
+minimum_commission_mode = "sensitivity_only"
+report_gross_and_net = true
+
+[benchmarks]
+market = "official_market_index"
+industry = "point_in_time_shenwan_level_1"
+matched_control = "same_date_same_industry_similar_pretrend_and_liquidity_non_candidate"
+same_day_baseline = "price_score_only"
+fallback_rule = "missing benchmark or control is reported and never replaced with zero"
+
+[market_regimes]
+model_cap_source = "current_internal_universe_breadth_rule"
+evaluation_slice_source = "official_market_index_only"
+evaluation_dimensions = ["trend", "volatility"]
+minimum_regime_sample_count = 30
+
+[metrics]
+return_metrics = [
+  "mean",
+  "median",
+  "win_rate",
+  "p05",
+  "p25",
+  "p75",
+  "p95",
+  "tail_loss_rate",
+  "max_drawdown",
+  "turnover",
+]
+coverage_metrics = [
+  "signals",
+  "canonical_securities",
+  "cohorts",
+  "security_state_join_coverage",
+  "valuation_join_coverage",
+  "fundamental_join_coverage",
+  "announcement_join_coverage",
+  "industry_join_coverage",
+  "matched_control_coverage",
+  "untradeable_rate",
+]
+excess_comparisons = ["market", "industry", "matched_control", "price_score_only"]
+
+[first_pass_gate]
+minimum_oos_observations = 100
+minimum_oos_cohorts = 60
+minimum_positive_rolling_window_ratio = 0.60
+minimum_positive_market_regime_ratio = 0.60
+minimum_median_net_excess_return = 0.0
+maximum_drawdown = 0.25
+decision = "full model and each leave-one-out increment are reported separately"
+
+[change_control]
+parameter_search_allowed = false
+positive_fundamental_weight_change_allowed = false
+positive_announcement_weight_change_allowed = false
+fulltext_allowed = false
+news_allowed = false
+community_opinion_allowed = false
+buy_confirmation_allowed = false
+stop_loss_allowed = false
+automatic_weight_change = false
+human_confirmation_required = true
+

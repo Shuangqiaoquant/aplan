@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "protocol_id": "daily_candidate_v0_1_historical_replay",
+  "version": "0.1.0",
+  "source": "config/daily_candidate_historical_validation.toml",
+  "sha256": "77e60006c4aaebc58bd8bf8b6b03cce83b966932ac7228df27aaf9869fba0f45",
+  "frozen_on": "2026-07-25",
+  "final_holdout_opened": false
+}
