@@ -323,7 +323,10 @@ def sync_benchmarks(
         market_data = ad.MarketData(base_data.get_calendar())
         cache_path = f"{cache.resolve()}{os.sep}"
         market_fetcher = lambda first, last: market_data.query_kline(
-            list(MARKET_INDICES), begin_date=int(first), end_date=int(last)
+            list(MARKET_INDICES),
+            begin_date=int(first),
+            end_date=int(last),
+            period=ad.constant.Period.day.value,
         )
         base_fetcher = lambda: info_data.get_industry_base_info(
             local_path=cache_path, is_local=False
