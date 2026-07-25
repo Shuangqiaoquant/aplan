@@ -4,6 +4,7 @@ import argparse
 import bisect
 import csv
 import hashlib
+import http.client
 import json
 import ssl
 import time
@@ -138,7 +139,12 @@ class CninfoClient:
                 context=self._ssl_context(),
             ) as response:
                 return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            json.JSONDecodeError,
+            http.client.HTTPException,
+        ) as exc:
             raise CninfoError(f"巨潮公告请求失败：{exc}") from exc
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import tempfile
 import unittest
@@ -33,6 +34,22 @@ class AnnouncementTests(unittest.TestCase):
         self.assertIsNotNone(value)
         self.assertEqual(value.title, "关于回购股份的公告")  # type: ignore[union-attr]
         self.assertTrue(value.source_url.startswith("https://static.cninfo.com.cn/"))  # type: ignore[union-attr]
+
+    def test_client_wraps_incomplete_http_reads_for_retry(self) -> None:
+        from unittest.mock import patch
+
+        from aplan.announcements import CninfoClient
+
+        with patch(
+            "aplan.announcements.urllib.request.urlopen",
+            side_effect=http.client.IncompleteRead(b"partial", 10),
+        ):
+            with self.assertRaisesRegex(CninfoError, "IncompleteRead"):
+                CninfoClient().query_page(
+                    "20230103",
+                    column="szse",
+                    page_num=1,
+                )
 
     def test_risk_rule_precedes_positive_language(self) -> None:
         announcement = Announcement(
