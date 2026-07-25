@@ -353,18 +353,29 @@ event, and hybrid research profiles:
 aplan-yinhe fundamentals-ad \
   --start 20220101 \
   --end 20260722 \
-  --symbols-file data/processed/yinhe_symbols.txt \
+  --symbols-file data/processed/security_history/security_master.csv \
   --chunk-size 50
 ```
 
 The extra 2022 reporting year supports year-over-year features for the 2023
-research start. The SQLite fact store preserves balance sheet, income, cash
+research start. The historical security master intentionally includes names
+that later delisted or entered ST status. The SQLite fact store preserves balance sheet, income, cash
 flow, profit express, and profit notice versions separately. `ANN_DATE`,
 `ACTUAL_ANN_DATE`, and a conservative `usable_from_trade_date` are retained;
 facts become usable only on the next official trading day after the source
 announcement date. Checkpoints are scoped to the requested date range, symbol
 pool hash, and chunk size, so rerunning the same command resumes rather than
 redownloading completed chunks.
+
+For the full cloud run, use the guarded background launcher:
+
+```bash
+bash scripts/start_cloud_yinhe_fundamentals.sh
+```
+
+It refuses to start a duplicate process, records the PID under `state/`, and
+filters supplier login tokens from
+`logs/yinhe_fundamentals_20220101_20260722.log`.
 
 ## Cron Example
 
