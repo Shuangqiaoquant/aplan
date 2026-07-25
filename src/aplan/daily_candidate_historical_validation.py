@@ -537,7 +537,11 @@ def _scan_candidates(
                 eligible_parts[symbol] = parts
             audit["eligible_signal_grains"] += len(eligible_parts)
             market_cap, industry_caps = _market_and_industry_caps(
-                eligible_parts, industries
+                {
+                    symbol: current[symbol]
+                    for symbol in eligible_parts
+                },
+                industries,
             )
             auxiliary: dict[
                 str,

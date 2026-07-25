@@ -11,6 +11,7 @@ from aplan.daily_candidate_historical_validation import (
     VALUATION_DEPENDENT,
     _exact_timeline_at,
     _factor_snapshot,
+    _market_and_industry_caps,
     _model_score,
     _protocol,
     _score_parts,
@@ -129,6 +130,18 @@ class DailyCandidateHistoricalValidationTests(unittest.TestCase):
             _exact_timeline_at(timeline, "20230105"),
             (12.0, 1.2),
         )
+
+    def test_market_caps_use_full_factor_snapshots(self) -> None:
+        snapshots = {
+            f"{index:06d}": (-0.10, 0.20, 0.0, 60_000_000.0, False)
+            for index in range(50)
+        }
+        market_cap, industry_caps = _market_and_industry_caps(
+            snapshots,
+            {symbol: "801010" for symbol in snapshots},
+        )
+        self.assertEqual(market_cap, 64.0)
+        self.assertEqual(industry_caps, {})
 
 
 if __name__ == "__main__":
