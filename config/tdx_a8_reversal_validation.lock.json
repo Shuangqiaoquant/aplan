@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "protocol_id": "tdx_a8_reversal_v0_1",
+  "version": "0.1.0",
+  "source": "config/tdx_a8_reversal_validation.toml",
+  "sha256": "14b56c80c772573e3ee3e3d8a195c4e637e90dfd682f1899eb58e72fe660ef5e",
+  "frozen_on": "2026-07-25",
+  "signal_implementation_sha256": "8fe3d8f89b96da2c95d18c8260be603011aa89d2b846ba96e1899af8e1a122fb",
+  "research_as_of_trade_date": "20251231",
+  "final_holdout_opened": false,
+  "parameter_search_allowed": false,
+  "source_formula_scope": "A8_buy_boolean_FILTER5_and_explicitly_labeled_multiscale_filters"
+}

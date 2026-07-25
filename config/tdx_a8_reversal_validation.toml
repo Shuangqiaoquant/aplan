@@ -1,0 +1,123 @@
+schema_version = 1
+protocol_id = "tdx_a8_reversal_v0_1"
+version = "0.1.0"
+status = "frozen_first_pass"
+frozen_on = "2026-07-25"
+research_only = true
+final_holdout_opened = false
+
+[source_formula]
+platform_language = "tongdaxin_compatible"
+signal_name = "buy"
+signal_definition = "LLV(A8,2)=LLV(A8,7) AND COUNT(A8<0,2)>0 AND CROSS(A8,MA(A8,2))"
+oscillator_definition = "100*EMA(EMA(CLOSE-REF(CLOSE,1),6),6)/EMA(EMA(ABS(CLOSE-REF(CLOSE,1)),6),6)"
+text_prompt_filter = "FILTER(buy=1,5)"
+signal_time = "completed_daily_close"
+entry = "next_trading_day_open"
+warmup_bars = 60
+
+[formula_audit]
+ema245_participates_in_original_buy = false
+cost90_participates_in_original_buy = false
+ma20_ma30_participate_in_original_buy = false
+kdj_participates_in_original_buy = false
+red_var_chain_participates_in_original_buy = false
+cost90_status = "data_unavailable_display_context_only"
+industry_region_concept_labels = "display_only_not_point_in_time_signal"
+
+[time_design]
+development_start = "2023-01-01"
+development_end = "2024-12-31"
+rolling_oos_start = "2025-01-01"
+rolling_oos_end = "2025-12-31"
+research_as_of_trade_date = "20251231"
+purge_trading_days = 60
+
+[universe]
+point_in_time_security_state_required = true
+canonical_alias_file = "data/processed/security_history/security_aliases.csv"
+minimum_listing_days = 120
+exclude_st = true
+exclude_delisting_risk = true
+exclude_suspended_signal = true
+minimum_average_turnover_previous_20d = 50000000
+
+[price]
+primary_series = "yinhe_qfq_daily"
+raw_close_sensitivity = true
+corporate_action_false_signal_audit = true
+missing_bar_policy = "reset_contiguous_history_and_report"
+
+[variants.exact_raw_buy]
+definition = "original_buy_boolean_without_FILTER"
+
+[variants.exact_text_prompt]
+definition = "original_buy_boolean_with_following_5_bars_suppressed"
+
+[variants.text_prompt_above_ema245]
+definition = "exact_text_prompt_and_close_above_ema245"
+is_original_formula = false
+
+[variants.text_prompt_trend_aligned]
+definition = "exact_text_prompt_and_close_above_ema245_and_ma20_above_ma30"
+is_original_formula = false
+
+[strategy_axis.red_hold_state]
+definition = "VAR1_through_VARC_display_chain"
+role = "separate_holding_or_exit_hypothesis_not_entry_score"
+
+[unavailable_axis.cost90_context]
+definition = "EMA(COST(90),13)"
+status = "data_unavailable"
+rule = "do_not_approximate_or_backfill_without_validated_historical_chip_distribution"
+
+[tradability]
+exclude_suspended_entry = true
+exclude_one_price_limit_up_entry = true
+report_untradeable_separately = true
+
+[horizons]
+evaluation_days = [1, 5, 10, 20, 40, 60]
+selection_rule = "training may nominate at most one horizon per preregistered variant; 2025 may only accept or reject"
+
+[costs]
+commission_rate_each_side = 0.0003
+slippage_rate_each_side = 0.001
+stamp_tax_rate_sell = 0.0005
+minimum_commission_mode = "sensitivity_only"
+report_gross_and_net = true
+
+[benchmarks]
+market = "official_market_index"
+industry = "point_in_time_shenwan_level_1"
+matched_control = "same_date_same_industry_similar_pretrend_drawdown_volatility_and_liquidity_non_signal"
+fallback_rule = "missing benchmark or control is reported and never replaced with zero"
+
+[market_regimes]
+source = "official_market_index_only"
+dimensions = ["trend", "volatility"]
+minimum_regime_sample_count = 30
+
+[metrics]
+return_metrics = ["mean", "median", "win_rate", "p05", "p25", "p75", "p95", "tail_loss_rate", "max_drawdown", "turnover"]
+coverage_metrics = ["signals", "canonical_securities", "cohorts", "security_state_join_coverage", "industry_join_coverage", "matched_control_coverage", "untradeable_rate"]
+excess_comparisons = ["market", "industry", "matched_control"]
+
+[first_pass_gate]
+minimum_oos_observations = 100
+minimum_oos_cohorts = 60
+minimum_positive_rolling_window_ratio = 0.60
+minimum_positive_market_regime_ratio = 0.60
+minimum_median_net_excess_return = 0.0
+maximum_drawdown = 0.25
+decision = "each variant must pass independently; exact formula and derived multiscale filters may not be pooled"
+
+[change_control]
+parameter_search_allowed = false
+stop_loss_allowed = false
+fundamental_inputs_allowed = false
+announcement_inputs_allowed = false
+news_inputs_allowed = false
+cost90_approximation_allowed = false
+automatic_weight_change = false
+human_confirmation_required = true
