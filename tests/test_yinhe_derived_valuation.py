@@ -282,6 +282,12 @@ class YinheDerivedValuationTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "validated")
             self.assertEqual(result["2026_rows"], 0)
+            self.assertEqual(
+                result["daily_coverage"]["20230103"][
+                    "raw_close_join_coverage"
+                ],
+                1.0,
+            )
             output = (
                 processed / "yinhe_derived_valuations" / "20230103.csv"
             )

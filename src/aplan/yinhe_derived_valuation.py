@@ -685,6 +685,8 @@ def build_derived_valuations(
                 for row in status_rows.values()
             )
             output: list[dict[str, Any]] = []
+            valid_raw_rows = 0
+            raw_state_joined = 0
             joined_raw = 0
             joined_share = 0
             joined_pe = 0
@@ -692,10 +694,14 @@ def build_derived_valuations(
             joined_mv = 0
             for symbol, raw in raw_rows.items():
                 status = status_rows.get(symbol)
-                if status is None or status["is_st"] or status["is_suspended"]:
-                    continue
                 raw_vendor_close = _number(raw.get("close"))
                 if raw_vendor_close is None or raw_vendor_close <= 0:
+                    continue
+                valid_raw_rows += 1
+                if status is None:
+                    continue
+                raw_state_joined += 1
+                if status["is_st"] or status["is_suspended"]:
                     continue
                 joined_raw += 1
                 raw_close = raw_vendor_close / PRICE_SCALE
@@ -812,7 +818,8 @@ def build_derived_valuations(
                 "eligible_with_raw_close": joined_raw,
                 "output_rows": len(output),
                 "raw_close_join_coverage": (
-                    joined_raw / eligible_status if eligible_status else 0.0
+                    raw_state_joined / valid_raw_rows
+                    if valid_raw_rows else 0.0
                 ),
                 "total_share_coverage": (
                     joined_share / denominator if denominator else 0.0
