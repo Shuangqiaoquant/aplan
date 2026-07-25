@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
@@ -135,7 +136,15 @@ def sync_backward_factors(
 
     factor_dir = project / "data" / "processed" / "yinhe_adj_factor"
     database = factor_dir / "backward_factors.sqlite3"
-    checkpoint_dir = project / "state" / "yinhe_adjustment" / f"{start}_{end}"
+    pool_key = hashlib.sha256(
+        f"{start}|{end}|{chunk_size}|{'|'.join(cleaned_symbols)}".encode()
+    ).hexdigest()[:12]
+    checkpoint_dir = (
+        project
+        / "state"
+        / "yinhe_adjustment"
+        / f"{start}_{end}_{pool_key}"
+    )
     cache_dir = project / "data" / "raw" / "yinhe" / "amazingdata_cache"
     calendar_path = project / "data" / "processed" / "trade_calendar.csv"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -234,6 +243,7 @@ def sync_backward_factors(
             "completed_chunks": completed,
             "factor_rows": inserted,
             "database_path": str(database),
+            "checkpoint_dir": str(checkpoint_dir),
             **calendar_summary,
         }
     finally:

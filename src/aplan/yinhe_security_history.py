@@ -26,6 +26,15 @@ NAME_HISTORY_FIELDS = (
     "end_date",
     "change_reason",
 )
+ALIAS_FIELDS = (
+    "old_symbol",
+    "new_symbol",
+    "last_old_date",
+    "first_new_date",
+    "entity_name",
+    "reason",
+    "source_url",
+)
 ROW_KEYS = {
     "MARKET_CODE",
     "SECURITY_CODE",
@@ -189,6 +198,60 @@ def _write_csv(path: Path, fields: tuple[str, ...], rows: Iterable[dict[str, Any
     temporary.replace(path)
 
 
+def _load_aliases(project: Path) -> list[dict[str, str]]:
+    path = project / "config" / "security_aliases.csv"
+    if not path.exists():
+        return []
+    aliases: list[dict[str, str]] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            alias = {field: str(row.get(field) or "").strip() for field in ALIAS_FIELDS}
+            old_symbol = _symbol_key(alias["old_symbol"])
+            new_symbol = _symbol_key(alias["new_symbol"])
+            last_old = _date_key(alias["last_old_date"])
+            first_new = _date_key(alias["first_new_date"])
+            if (
+                not old_symbol
+                or not new_symbol
+                or old_symbol == new_symbol
+                or not last_old
+                or not first_new
+                or last_old >= first_new
+            ):
+                raise ValueError(f"证券代码别名配置无效：{alias}")
+            alias.update(
+                {
+                    "old_symbol": old_symbol,
+                    "new_symbol": new_symbol,
+                    "last_old_date": last_old,
+                    "first_new_date": first_new,
+                }
+            )
+            aliases.append(alias)
+    return aliases
+
+
+def _canonicalize_master(
+    master: list[dict[str, str]],
+    aliases: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    rows = {row["symbol"]: dict(row) for row in master}
+    applied: list[dict[str, str]] = []
+    for alias in aliases:
+        old_symbol = alias["old_symbol"]
+        new_symbol = alias["new_symbol"]
+        target = rows.get(new_symbol)
+        if target is None:
+            continue
+        old = rows.pop(old_symbol, None)
+        if old and old.get("list_date"):
+            target_date = target.get("list_date") or ""
+            if not target_date or old["list_date"] < target_date:
+                target["list_date"] = old["list_date"]
+        applied.append(alias)
+    return [rows[symbol] for symbol in sorted(rows)], applied
+
+
 def _write_st_intervals(
     connection: sqlite3.Connection,
     path: Path,
@@ -261,6 +324,146 @@ def _calendar_dates(path: Path, start: str, end: str) -> set[str]:
             and start <= day <= end
             and str(row.get("is_open") or "1").lower() not in {"0", "false", "no"}
         }
+
+
+def _finalize_security_history(
+    project: Path,
+    *,
+    start: str,
+    end: str,
+    master: list[dict[str, str]],
+    aliases: list[dict[str, str]],
+) -> dict[str, Any]:
+    output = project / "data" / "processed" / "security_history"
+    database = output / "daily_status.sqlite3"
+    master_path = output / "security_master.csv"
+    names_path = output / "name_history.csv"
+    aliases_path = output / "security_aliases.csv"
+    manifest_path = output / "manifest.json"
+    _write_csv(master_path, MASTER_FIELDS, master)
+    _write_csv(aliases_path, ALIAS_FIELDS, aliases)
+
+    connection = sqlite3.connect(database)
+    try:
+        names = {row["symbol"]: row["name"] for row in master}
+        st_intervals = _write_st_intervals(connection, names_path, names)
+        status_rows = connection.execute("SELECT COUNT(*) FROM daily_status").fetchone()[0]
+        status_symbols = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT symbol FROM daily_status")
+        }
+        status_dates = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT trade_date FROM daily_status")
+        }
+    finally:
+        connection.close()
+
+    missing_list_date_symbols = sorted(
+        row["symbol"] for row in master if not row["list_date"]
+    )
+    requested_symbols = {row["symbol"] for row in master}
+    missing_status_symbols = sorted(requested_symbols - status_symbols)
+    expected_dates = _calendar_dates(
+        project / "data" / "processed" / "trade_calendar.csv",
+        start,
+        end,
+    )
+    missing_trade_dates = sorted(expected_dates - status_dates)
+    point_in_time = bool(
+        status_rows
+        and not missing_list_date_symbols
+        and not missing_status_symbols
+        and expected_dates
+        and not missing_trade_dates
+    )
+    manifest = {
+        "schema_version": 1,
+        "status": "validated" if point_in_time else "failed_validation",
+        "provider": "China Galaxy AmazingData",
+        "contract": "aplan_security_history_v1",
+        "point_in_time": point_in_time,
+        "coverage_start": start,
+        "coverage_end": end,
+        "security_count": len(master),
+        "status_rows": status_rows,
+        "status_symbols": len(status_symbols),
+        "st_intervals": st_intervals,
+        "code_aliases": len(aliases),
+        "missing_list_dates": len(missing_list_date_symbols),
+        "missing_list_date_samples": missing_list_date_symbols[:20],
+        "missing_status_symbols": len(missing_status_symbols),
+        "missing_status_symbol_samples": missing_status_symbols[:20],
+        "calendar_verified": bool(expected_dates),
+        "expected_trade_dates": len(expected_dates),
+        "observed_trade_dates": len(status_dates),
+        "missing_trade_dates": len(missing_trade_dates),
+        "missing_trade_date_samples": missing_trade_dates[:20],
+        "status_fields": [
+            "listing",
+            "delisting",
+            "st",
+            "suspension",
+            "price_limits",
+            "ex_dividend",
+            "ex_right",
+            "security_code_alias",
+        ],
+        "availability_timestamp_field": "available_date",
+        "strict_availability_lag": False,
+        "availability_note": (
+            "Same-day security state is treated as session metadata; "
+            "supplier documentation does not provide an exact publication timestamp."
+        ),
+        "paths": {
+            "security_master": str(master_path),
+            "name_history": str(names_path),
+            "security_aliases": str(aliases_path),
+            "daily_status": str(database),
+        },
+        "hashes": {
+            "security_master_sha256": _sha256(master_path),
+            "name_history_sha256": _sha256(names_path),
+            "security_aliases_sha256": _sha256(aliases_path),
+            "daily_status_sha256": _sha256(database),
+        },
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {**manifest, "manifest_path": str(manifest_path)}
+
+
+def reconcile_security_history(
+    project: Path,
+    *,
+    start_date: str,
+    end_date: str,
+) -> dict[str, Any]:
+    start, end = _date_key(start_date), _date_key(end_date)
+    if not start or not end or start > end:
+        raise ValueError("历史证券状态协调的开始和结束日期无效")
+    output = project / "data" / "processed" / "security_history"
+    master_path = output / "security_master.csv"
+    database = output / "daily_status.sqlite3"
+    if not master_path.exists() or not database.exists():
+        raise ValueError("历史证券状态协调需要 security_master.csv 和 daily_status.sqlite3")
+    with master_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        master = [
+            {field: str(row.get(field) or "") for field in MASTER_FIELDS}
+            for row in csv.DictReader(handle)
+        ]
+    master, applied_aliases = _canonicalize_master(master, _load_aliases(project))
+    result = _finalize_security_history(
+        project,
+        start=start,
+        end=end,
+        master=master,
+        aliases=applied_aliases,
+    )
+    return {**result, "reconciled_aliases": len(applied_aliases)}
 
 
 def sync_security_history(
@@ -346,8 +549,8 @@ def sync_security_history(
         if not codes:
             raise ValueError("银河历史代码表返回为空")
         master = _master_rows(basic_fetcher(codes), codes)
+        master, applied_aliases = _canonicalize_master(master, _load_aliases(project))
         _write_csv(master_path, MASTER_FIELDS, master)
-        missing_list_dates = sum(not row["list_date"] for row in master)
 
         connection = _connect(database)
         chunks = [codes[index : index + chunk_size] for index in range(0, len(codes), chunk_size)]
@@ -392,102 +595,21 @@ def sync_security_history(
                 f"symbols={len(chunk)}，rows={len(rows)}"
             )
 
-        names = {row["symbol"]: row["name"] for row in master}
-        st_intervals = _write_st_intervals(connection, names_path, names)
         connection.commit()
         connection.close()
         connection = None
-        verification = sqlite3.connect(database)
-        try:
-            status_rows = verification.execute(
-                "SELECT COUNT(*) FROM daily_status"
-            ).fetchone()[0]
-            status_symbols = {
-                row[0]
-                for row in verification.execute(
-                    "SELECT DISTINCT symbol FROM daily_status"
-                )
-            }
-            status_dates = {
-                row[0]
-                for row in verification.execute(
-                    "SELECT DISTINCT trade_date FROM daily_status"
-                )
-            }
-        finally:
-            verification.close()
-        requested_symbols = {row["symbol"] for row in master}
-        missing_status_symbols = sorted(requested_symbols - status_symbols)
-        expected_dates = _calendar_dates(
-            project / "data" / "processed" / "trade_calendar.csv",
-            start,
-            end,
-        )
-        missing_trade_dates = sorted(expected_dates - status_dates)
-        point_in_time = bool(
-            status_rows
-            and not missing_list_dates
-            and not missing_status_symbols
-            and expected_dates
-            and not missing_trade_dates
-        )
-        manifest = {
-            "schema_version": 1,
-            "status": "validated" if point_in_time else "failed_validation",
-            "provider": "China Galaxy AmazingData",
-            "contract": "aplan_security_history_v1",
-            "point_in_time": point_in_time,
-            "coverage_start": start,
-            "coverage_end": end,
-            "security_count": len(master),
-            "status_rows": status_rows,
-            "status_symbols": len(status_symbols),
-            "st_intervals": st_intervals,
-            "missing_list_dates": missing_list_dates,
-            "missing_status_symbols": len(missing_status_symbols),
-            "missing_status_symbol_samples": missing_status_symbols[:20],
-            "calendar_verified": bool(expected_dates),
-            "expected_trade_dates": len(expected_dates),
-            "observed_trade_dates": len(status_dates),
-            "missing_trade_dates": len(missing_trade_dates),
-            "missing_trade_date_samples": missing_trade_dates[:20],
-            "status_fields": [
-                "listing",
-                "delisting",
-                "st",
-                "suspension",
-                "price_limits",
-                "ex_dividend",
-                "ex_right",
-            ],
-            "availability_timestamp_field": "available_date",
-            "strict_availability_lag": False,
-            "availability_note": (
-                "Same-day security state is treated as session metadata; "
-                "supplier documentation does not provide an exact publication timestamp."
-            ),
-            "paths": {
-                "security_master": str(master_path),
-                "name_history": str(names_path),
-                "daily_status": str(database),
-            },
-            "hashes": {
-                "security_master_sha256": _sha256(master_path),
-                "name_history_sha256": _sha256(names_path),
-                "daily_status_sha256": _sha256(database),
-            },
-            "generated_at": datetime.now(UTC).isoformat(),
-        }
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        manifest = _finalize_security_history(
+            project,
+            start=start,
+            end=end,
+            master=master,
+            aliases=applied_aliases,
         )
         return {
             **manifest,
             "chunks": len(chunks),
             "completed_chunks": completed,
             "downloaded_status_rows": inserted,
-            "manifest_path": str(manifest_path),
         }
     finally:
         if connection is not None:

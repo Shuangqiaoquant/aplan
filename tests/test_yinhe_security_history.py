@@ -7,7 +7,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from aplan.yinhe_security_history import sync_security_history
+from aplan.yinhe_security_history import (
+    reconcile_security_history,
+    sync_security_history,
+)
 
 
 class YinheSecurityHistoryTests(unittest.TestCase):
@@ -108,3 +111,65 @@ class YinheSecurityHistoryTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed_validation")
             self.assertFalse(result["point_in_time"])
             self.assertEqual(result["missing_list_dates"], 1)
+
+    def test_reconcile_code_alias_without_redownloading_status_history(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            calendar = project / "data" / "processed" / "trade_calendar.csv"
+            calendar.parent.mkdir(parents=True)
+            calendar.write_text(
+                "trade_date,is_open\n20250214,1\n20250217,1\n",
+                encoding="utf-8",
+            )
+            initial = sync_security_history(
+                project,
+                start_date="20250214",
+                end_date="20250217",
+                code_fetcher=lambda start, end, cache: ["300114.SZ", "302132.SZ"],
+                basic_fetcher=lambda codes: [
+                    {
+                        "MARKET_CODE": "302132.SZ",
+                        "SECURITY_NAME": "中航成飞",
+                        "LISTDATE": 20100827,
+                    }
+                ],
+                history_fetcher=lambda codes, start, end, cache: [
+                    {
+                        "MARKET_CODE": "302132.SZ",
+                        "TRADE_DATE": day,
+                        "IS_ST_SEC": 0,
+                        "IS_SUSP_SEC": 0,
+                    }
+                    for day in ("20250214", "20250217")
+                    if "302132.SZ" in codes
+                ],
+            )
+            self.assertFalse(initial["point_in_time"])
+
+            config = project / "config" / "security_aliases.csv"
+            config.parent.mkdir()
+            config.write_text(
+                "old_symbol,new_symbol,last_old_date,first_new_date,"
+                "entity_name,reason,source_url\n"
+                "300114,302132,20250214,20250217,"
+                "AVIC Chengdu Aircraft,security_code_change,https://example.com\n",
+                encoding="utf-8",
+            )
+
+            result = reconcile_security_history(
+                project,
+                start_date="20250214",
+                end_date="20250217",
+            )
+
+            self.assertTrue(result["point_in_time"])
+            self.assertEqual(result["reconciled_aliases"], 1)
+            self.assertEqual(result["security_count"], 1)
+            output = project / "data" / "processed" / "security_history"
+            with (output / "security_master.csv").open(encoding="utf-8") as handle:
+                master = list(csv.DictReader(handle))
+            with (output / "security_aliases.csv").open(encoding="utf-8") as handle:
+                aliases = list(csv.DictReader(handle))
+            self.assertEqual([row["symbol"] for row in master], ["302132"])
+            self.assertEqual(aliases[0]["old_symbol"], "300114")
+            self.assertEqual(aliases[0]["new_symbol"], "302132")

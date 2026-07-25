@@ -266,6 +266,40 @@ AKSHARE_SYMBOLS_FILE=data/processed/candidates/latest_symbols.txt \
 bash scripts/cloud_backfill_data.sh
 ```
 
+## Yinhe Security Code Changes
+
+Security-code changes are recorded in `config/security_aliases.csv` with the
+last trading day of the old code, the first trading day of the new code, and an
+official source URL. After adding a verified alias, reconcile the already
+downloaded point-in-time security history without querying Galaxy again:
+
+```bash
+aplan-yinhe reconcile-security-history \
+  --start 20230101 \
+  --end 20260724
+```
+
+Backfill only the affected code chain. `backfill-range` merges returned rows
+into existing daily files and preserves all other symbols:
+
+```bash
+aplan-yinhe backfill-range \
+  --start 20230101 \
+  --end 20260722 \
+  --symbols 300114,302132 \
+  --chunk-size 2
+```
+
+Rebuild the current symbol pool after a code change. The pool is selected by
+Galaxy security type and exchange instead of a fixed list of numeric prefixes:
+
+```bash
+aplan-yinhe build-symbols
+```
+
+Adjustment checkpoints include a hash of the requested symbol set, so a small
+incremental factor query cannot accidentally reuse a full-market checkpoint.
+
 ## Provisional Yinhe Price Baseline
 
 After acceptance reports `raw_price_research_ready=true`, run the frozen

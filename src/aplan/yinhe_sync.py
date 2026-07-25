@@ -51,7 +51,7 @@ SECURITY_FIELDS = (
 )
 
 SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
-SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
+SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301", "302")
 A_SHARE_PREFIXES = SHANGHAI_A_SHARE_PREFIXES + SHENZHEN_A_SHARE_PREFIXES
 A_SHARE_SECURITY_TYPES = {"02001", "02003", "02004", "02009"}
 
@@ -414,9 +414,12 @@ def build_symbol_pool(
         for row in reader:
             total_rows += 1
             symbol = _strip_suffix(row.get("symbol", ""))
-            if len(symbol) != 6 or not symbol.isdigit() or not symbol.startswith(A_SHARE_PREFIXES):
+            if len(symbol) != 6 or not symbol.isdigit():
                 continue
             if str(row.get("security_type", "")).strip() not in A_SHARE_SECURITY_TYPES:
+                continue
+            market = str(row.get("market", "")).strip().lower()
+            if market not in {"sse", "szse"}:
                 continue
             if not include_st and str(row.get("is_st", "0")).strip().lower() in {"1", "true", "yes"}:
                 continue
@@ -1599,6 +1602,7 @@ def main() -> None:
             "adjustment-ad",
             "build-adjustment",
             "security-history-ad",
+            "reconcile-security-history",
             "snapshot",
             "snapshot-ad",
         ],
@@ -1765,6 +1769,18 @@ def main() -> None:
                 config=YinheConfig.from_env(args.env_file),
                 chunk_size=args.chunk_size,
                 overwrite=args.overwrite,
+            )
+        elif args.command == "reconcile-security-history":
+            if not args.start or not args.end:
+                raise SystemExit(
+                    "reconcile-security-history 必须提供 --start YYYYMMDD 和 --end YYYYMMDD"
+                )
+            from .yinhe_security_history import reconcile_security_history
+
+            result = reconcile_security_history(
+                root,
+                start_date=args.start,
+                end_date=args.end,
             )
         elif args.command == "snapshot":
             if not args.date:

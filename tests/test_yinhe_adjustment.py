@@ -11,6 +11,7 @@ from aplan.yinhe_adjustment import (
     _connect,
     _quarantine_allowed,
     build_forward_adjusted_daily,
+    sync_backward_factors,
 )
 
 
@@ -37,6 +38,30 @@ def _write_day(path: Path, day: str, close: float) -> None:
 
 
 class YinheAdjustmentTests(unittest.TestCase):
+    def test_factor_checkpoints_are_scoped_to_requested_symbol_pool(self) -> None:
+        class Frame:
+            def __init__(self, codes: list[str]) -> None:
+                self.columns = codes
+
+            def __getitem__(self, code: str) -> dict[str, float]:
+                return {"20230102": 1.0}
+
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            common = {
+                "project": project,
+                "start_date": "20230102",
+                "end_date": "20230102",
+                "calendar": ["20230102"],
+                "factor_fetcher": lambda codes, cache: Frame(codes),
+            }
+            first = sync_backward_factors(symbols=["600000"], **common)
+            second = sync_backward_factors(symbols=["000001"], **common)
+
+            self.assertNotEqual(first["checkpoint_dir"], second["checkpoint_dir"])
+            self.assertEqual(first["completed_chunks"], 1)
+            self.assertEqual(second["completed_chunks"], 1)
+
     def test_quarantine_requires_a_tiny_affected_share(self) -> None:
         self.assertTrue(_quarantine_allowed({"603097"}, 4995))
         self.assertFalse(_quarantine_allowed({"603097"}, 100))

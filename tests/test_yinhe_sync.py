@@ -257,6 +257,7 @@ class YinheSyncTests(unittest.TestCase):
                 "600000,浦发银行,1999-11-10,银行,0,0,sse,02001,\n"
                 "000001,平安银行,1991-04-03,银行,0,0,szse,02001,\n"
                 "300001,特锐德,2009-10-30,电力设备,0,0,szse,02003,\n"
+                "302132,中航成飞,2010-08-27,航空装备,0,0,szse,02003,\n"
                 "688001,华兴源创,2019-07-22,机械,0,0,sse,02004,\n"
                 "600001,*ST测试,2000-01-01,未知,1,0,sse,02001,\n"
                 "000002,退市测试,2000-01-01,未知,0,1,szse,02001,\n"
@@ -268,11 +269,11 @@ class YinheSyncTests(unittest.TestCase):
             result = build_symbol_pool(root)
             output = root / "data" / "processed" / "yinhe_symbols.txt"
 
-            self.assertEqual(result["source_rows"], 8)
-            self.assertEqual(result["symbols"], 4)
+            self.assertEqual(result["source_rows"], 9)
+            self.assertEqual(result["symbols"], 5)
             self.assertEqual(
                 output.read_text(encoding="utf-8").splitlines(),
-                ["000001", "300001", "600000", "688001"],
+                ["000001", "300001", "302132", "600000", "688001"],
             )
 
     def test_build_symbol_pool_can_include_risk_names(self) -> None:
