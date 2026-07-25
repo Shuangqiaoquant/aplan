@@ -304,6 +304,16 @@ class AnnouncementTests(unittest.TestCase):
             self.assertEqual(result["page_stats"]["szse"]["requested_pages"], 2)
             self.assertEqual(result["page_stats"]["szse"]["received_rows"], 31)
 
+    def test_sync_rejects_unsupported_large_page_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "1 到 30"):
+                sync_announcements(
+                    Path(directory),
+                    "20230107",
+                    trade_calendar=["20230109"],
+                    page_size=100,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

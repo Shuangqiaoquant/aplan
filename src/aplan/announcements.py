@@ -462,9 +462,11 @@ def sync_announcements(
     retries: int = 3,
     retry_delay: float = 5,
     request_delay: float = 0.2,
-    page_size: int = 100,
+    page_size: int = 30,
     client: CninfoClient | None = None,
 ) -> dict[str, Any]:
+    if not 1 <= page_size <= 30:
+        raise ValueError("巨潮历史公告 page_size 必须在 1 到 30 之间")
     client = client or CninfoClient()
     raw_directory = project / "data" / "raw" / "cninfo" / trade_date
     raw_directory.mkdir(parents=True, exist_ok=True)
@@ -667,8 +669,9 @@ def backfill_announcements(
     retry_delay: float = 5,
     request_delay: float = 0.2,
     day_delay: float = 0.5,
-    page_size: int = 100,
+    page_size: int = 30,
     overwrite: bool = False,
+    build_archive_after: bool = True,
     client: CninfoClient | None = None,
 ) -> dict[str, Any]:
     calendar = _load_trade_calendar(calendar_file)
@@ -707,11 +710,15 @@ def backfill_announcements(
             break
         if day_delay and index < len(selected):
             time.sleep(day_delay)
-    archive = build_announcement_archive(
-        project,
-        start=start,
-        end=end,
-        trade_calendar=calendar,
+    archive = (
+        build_announcement_archive(
+            project,
+            start=start,
+            end=end,
+            trade_calendar=calendar,
+        )
+        if build_archive_after
+        else {"status": "deferred"}
     )
     return {
         "status": "completed" if not failed else "partial",
@@ -742,7 +749,8 @@ def main() -> None:
     parser.add_argument("--retry-delay", type=float, default=5)
     parser.add_argument("--request-delay", type=float, default=0.2)
     parser.add_argument("--day-delay", type=float, default=0.5)
-    parser.add_argument("--page-size", type=int, default=100)
+    parser.add_argument("--page-size", type=int, default=30)
+    parser.add_argument("--skip-archive", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     project = Path(args.root).resolve()
@@ -802,6 +810,7 @@ def main() -> None:
             day_delay=args.day_delay,
             page_size=args.page_size,
             overwrite=args.overwrite,
+            build_archive_after=not args.skip_archive,
         )
     if args.command in {"backfill", "build-archive"}:
         print(json.dumps(result, ensure_ascii=False, indent=2))
