@@ -139,6 +139,32 @@ class YinheFundamentalTests(unittest.TestCase):
             self.assertEqual(manifest["completed_chunks"], 1)
             self.assertTrue(manifest["symbol_pool_sha256"])
 
+    def test_right_edge_announcements_are_pending_not_timing_violations(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            path = project / "data" / "processed" / "trade_calendar.csv"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "trade_date,is_open\n"
+                "20230102,1\n"
+                "20230103,1\n"
+                "20230104,1\n",
+                encoding="utf-8",
+            )
+
+            result = sync_fundamentals(
+                project,
+                start_date="20220101",
+                end_date="20231231",
+                symbols=["600000"],
+                chunk_size=1,
+                fetcher=_fetch,
+            )
+
+            self.assertEqual(result["status"], "validated")
+            self.assertEqual(result["invalid_timing_rows"], 0)
+            self.assertEqual(result["pending_availability_rows"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -396,8 +396,14 @@ def sync_fundamentals(
         invalid_timing = int(
             connection.execute(
                 "SELECT COUNT(*) FROM financial_facts "
-                "WHERE usable_from_trade_date = '' "
-                "OR usable_from_trade_date <= actual_ann_date"
+                "WHERE usable_from_trade_date <> '' "
+                "AND usable_from_trade_date <= actual_ann_date"
+            ).fetchone()[0]
+        )
+        pending_availability = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM financial_facts "
+                "WHERE usable_from_trade_date = ''"
             ).fetchone()[0]
         )
         correction_versions = int(
@@ -436,6 +442,7 @@ def sync_fundamentals(
         "rows_by_table": counts_by_table,
         "correction_versions": correction_versions,
         "invalid_timing_rows": invalid_timing,
+        "pending_availability_rows": pending_availability,
         "strict_availability_lag": True,
         "availability_field": "usable_from_trade_date",
         "availability_rule": (
