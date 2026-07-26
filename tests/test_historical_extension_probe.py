@@ -158,6 +158,68 @@ class HistoricalExtensionProbeTests(unittest.TestCase):
         )
         self.assertLess(result["matrix"]["raw_status_factor_join"]["coverage"], 0.98)
 
+    def test_suspended_day_without_bar_is_legal_absence(self) -> None:
+        active = {"600000", "000001", "600999"}
+        expected = [(day, symbol) for day in DATES for symbol in active]
+        suspended_key = (DATES[0], "600999")
+        result = evaluate_probe(
+            dates=DATES,
+            historical_pools={day: set(active) for day in DATES},
+            master_rows=_master(),
+            sample_symbols=list(active),
+            daily_rows=[
+                {"trade_date": day, "symbol": symbol}
+                for day, symbol in expected
+                if (day, symbol) != suspended_key
+            ],
+            status_rows=[
+                (
+                    day,
+                    symbol,
+                    0,
+                    int((day, symbol) == suspended_key),
+                    0,
+                    0,
+                    10,
+                    11,
+                    9,
+                    day,
+                )
+                for day, symbol in expected
+            ],
+            factor_rows=[(day, symbol, 1.0) for day, symbol in expected],
+            market_rows=[
+                {"trade_date": day, "index_code": code}
+                for day in DATES
+                for code in ("000001.SH", "000300.SH", "000905.SH", "399001.SZ")
+            ],
+            weight_rows=[
+                {
+                    "trade_date": day,
+                    "symbol": symbol,
+                    "index_code": "801010.SI",
+                    "weight": 1.0,
+                }
+                for day, symbol in expected
+            ],
+            constituent_rows=[],
+            errors=[],
+        )
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["matrix"]["raw_daily"]["coverage"], 1.0)
+        self.assertEqual(
+            result["matrix"]["raw_status_factor_join"]["coverage"], 1.0
+        )
+        self.assertIn(
+            {
+                "trade_date": DATES[0],
+                "symbol": "600999",
+                "reason": "suspended_no_daily_bar",
+            },
+            result["legal_absence"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

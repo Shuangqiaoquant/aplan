@@ -195,9 +195,27 @@ def evaluate_probe(
         (_date(row.get("trade_date")), _symbol_key(row.get("symbol")))
         for row in daily_rows
     }
-    status_keys = {(_date(row[0]), _symbol_key(row[1])) for row in status_rows}
+    status_map = {
+        (_date(row[0]), _symbol_key(row[1])): {"is_suspended": bool(row[3])}
+        for row in status_rows
+    }
+    status_keys = set(status_map)
     factor_keys = {(_date(row[0]), _symbol_key(row[1])) for row in factor_rows}
-    triple_keys = expected & raw_keys & status_keys & factor_keys
+    suspended = {
+        key
+        for key in expected
+        if status_map.get(key, {}).get("is_suspended")
+    }
+    legal_absence.extend(
+        {
+            "trade_date": day,
+            "symbol": symbol,
+            "reason": "suspended_no_daily_bar",
+        }
+        for day, symbol in sorted(suspended - raw_keys)
+    )
+    tradable_expected = expected - suspended
+    triple_keys = tradable_expected & raw_keys & status_keys & factor_keys
 
     weight_map = {
         (row["trade_date"], row["symbol"]): row["index_code"]
@@ -241,7 +259,7 @@ def evaluate_probe(
         and master[symbol]["delist_date"] < "20230101"
     ]
 
-    join_coverage = _ratio(len(triple_keys), len(expected))
+    join_coverage = _ratio(len(triple_keys), len(tradable_expected))
     industry_coverage = _ratio(len(industry_keys), len(expected))
     historical_pool_ok = all(historical_pools.get(day) for day in dates) and bool(delisted)
     join_ok = join_coverage is not None and join_coverage >= JOIN_THRESHOLD
@@ -264,8 +282,11 @@ def evaluate_probe(
             "code_lineage": "partial_no_general_a_share_mapping_api",
         },
         "raw_daily": {
-            "status": "passed" if expected <= raw_keys else "blocked",
-            "coverage": _ratio(len(expected & raw_keys), len(expected)),
+            "status": "passed" if tradable_expected <= raw_keys else "blocked",
+            "coverage": _ratio(
+                len(tradable_expected & raw_keys), len(tradable_expected)
+            ),
+            "suspended_without_bar": len(suspended - raw_keys),
         },
         "daily_security_status": {
             "status": "passed" if expected <= status_keys else "blocked",
@@ -323,6 +344,7 @@ def evaluate_probe(
         "probe_dates": list(dates),
         "sample_symbols": sample_symbols,
         "expected_symbol_dates": len(expected),
+        "expected_tradable_symbol_dates": len(tradable_expected),
         "legal_absence": legal_absence,
         "delisted_evidence": delisted,
         "matrix": matrix,
@@ -505,7 +527,7 @@ def run_probe(project: Path, env_file: Path) -> dict[str, Any]:
                 constituents = _constituent_rows(value)
         finally:
             if ad is not None and hasattr(ad, "logout"):
-                _safe_call("logout", ad.logout, errors)
+                _safe_call("logout", lambda: ad.logout(config.username), errors)
 
     evidence = evaluate_probe(
         dates=dates,
