@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "protocol_id": "selective_regime_opportunity_audit_v0_1",
+  "version": "0.1.0",
+  "source": "config/selective_regime_opportunity_audit.toml",
+  "sha256": "a3e6b5afe688a65a5cb5b1d89f9c79d271695b99937b176eb15892d4e2709d3c",
+  "frozen_on": "2026-07-25",
+  "maximum_signal_date": "20241008",
+  "forbidden_read_start": "20250101",
+  "final_holdout_opened": false,
+  "complexity_budget": {
+    "new_experts": 2,
+    "fixed_legacy_intersections": 4,
+    "selector_allowed": false
+  }
+}

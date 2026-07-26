@@ -1,0 +1,186 @@
+schema_version = 1
+protocol_id = "selective_regime_opportunity_audit_v0_1"
+version = "0.1.0"
+status = "frozen_phase0"
+frozen_on = "2026-07-25"
+research_only = true
+final_holdout_opened = false
+
+[purpose]
+decision = "determine_whether_any_simple_regime_conditioned_expert_or_fixed_rejected_model_intersection_has_training_only_net_matched_excess"
+not_a_model_backtest = true
+selector_training_allowed = false
+portfolio_simulation_allowed = false
+
+[time_design]
+read_start = "2023-01-01"
+maximum_signal_date = "2024-10-08"
+development_data_end = "2024-12-31"
+forbidden_read_start = "2025-01-01"
+purge_trading_days = 60
+folds = [
+  ["2023-04-03", "2023-08-31"],
+  ["2023-09-01", "2023-12-29"],
+  ["2024-01-02", "2024-05-31"],
+  ["2024-06-03", "2024-10-08"],
+]
+
+[universe]
+point_in_time_security_state_required = true
+canonical_alias_file = "data/processed/security_history/security_aliases.csv"
+minimum_listing_days = 120
+exclude_st = true
+exclude_delisting_risk = true
+exclude_suspended_signal = true
+minimum_average_turnover_previous_20d = 50000000
+missing_feature_policy = "exclude_from_affected_feature_or_expert_and_report_never_impute"
+
+[signal_and_target]
+feature_time = "completed_daily_close"
+entry = "next_trading_day_open"
+evaluation_days = [5, 20]
+primary_horizon = 20
+secondary_horizon = 5
+target = "geometric_net_excess_vs_same_date_same_industry_matched_control"
+target_formula = "(1+stock_net_return)/(1+matched_control_return)-1"
+candidate_grain = "canonical_security_x_signal_date_x_route"
+duplicate_weighting = "one_equal_weight_observation_per_candidate_grain"
+
+[market_state]
+official_index = "000300.SH"
+breadth_universe = "same_point_in_time_eligible_stock_universe"
+index_ma_period = 60
+index_return_short_days = 5
+index_return_medium_days = 20
+realized_volatility_days = 20
+volatility_reference_days = 120
+breadth_ma_period = 20
+breadth_strong_threshold = 0.55
+breadth_stress_threshold = 0.40
+breadth_recovery_change_5d = 0.10
+stress_memory_days = 10
+state_priority = ["recovery", "stress", "trend_expansion", "other"]
+trend_expansion = "index_close_gt_ma60 AND index_return20_gt_0 AND breadth_above_ma20_ge_0_55"
+stress = "index_close_lt_ma60 AND index_return20_lt_0 AND breadth_above_ma20_le_0_40 AND realized_vol20_ge_trailing120d_median"
+recovery = "stress_seen_in_prior10_completed_days AND index_return5_gt_0 AND breadth_change5_ge_0_10"
+other = "all_remaining_dates"
+
+[features]
+price_source = "yinhe_qfq_daily"
+industry_source = "point_in_time_shenwan_level_1_official_index"
+cross_sectional_transform = "same_date_same_point_in_time_industry_percentile_rank"
+corporate_action_sensitivity = "raw_close_signal_overlap_diagnostic_only"
+
+[features.residual_continuation]
+residual_return20 = "stock_qfq_return20_minus_pit_industry_index_return20"
+residual_return60 = "stock_qfq_return60_minus_pit_industry_index_return60"
+trend_efficiency20 = "abs(log_close_change20)/sum_abs_daily_log_returns20_with_direction_set_by_residual_return20"
+composite = "equal_weight_mean_of_three_same_date_same_industry_percentile_ranks"
+eligible_market_state = "trend_expansion"
+selection = "top_decile_within_eligible_market_state"
+
+[features.residual_recovery]
+residual_drawdown20 = "stock_drawdown_from_prior20_high_minus_pit_industry_index_drawdown20"
+residual_return3 = "stock_qfq_return3_minus_pit_industry_index_return3"
+downside_turnover_exhaustion = "mean_turnover_on_negative_return_days_last5_divided_by_mean_turnover_on_negative_return_days_prior6_to20"
+downside_turnover_minimum_negative_days_each_window = 2
+composite = "equal_weight_mean_of_ranked_negative_residual_drawdown20_positive_residual_return3_and_negative_downside_turnover_exhaustion"
+eligible_market_state = "recovery"
+selection = "top_decile_within_eligible_market_state"
+
+[legacy_interaction_audit]
+role = "fixed_negative_control_intersections_not_weight_optimized"
+source_price = "daily_candidate_v0_1_price_score_only_top5"
+source_trend = "trend_monitor_v0_1_any_of_B1_B2_B3"
+source_recovery = "tdx_a8_reversal_v0_1_exact_text_prompt"
+routes = [
+  "price_AND_trend",
+  "price_AND_a8",
+  "trend_AND_a8",
+  "price_AND_trend_AND_a8",
+]
+signal_join = "same_canonical_security_same_signal_date"
+parameter_or_weight_search = false
+promotion_rule = "must_beat_zero_and_each_component_on_same_sample_after_costs"
+
+[matched_control]
+count = 5
+same_signal_date = true
+same_point_in_time_industry = true
+exclude_same_route_candidates = true
+distance_dimensions = ["residual_return20", "residual_drawdown20", "realized_volatility20", "median_turnover20"]
+missing_control_policy = "report_and_exclude_never_zero_fill"
+
+[costs]
+commission_rate_each_side = 0.0003
+slippage_rate_each_side = 0.001
+stamp_tax_rate_sell = 0.0005
+minimum_commission_mode = "sensitivity_only"
+
+[primary_kpis]
+expert = [
+  "median_net_matched_excess",
+  "median_daily_spearman_ic",
+  "top_decile_minus_bottom_decile_net_matched_spread",
+  "positive_fold_ratio",
+]
+legacy_intersection = [
+  "median_net_matched_excess",
+  "increment_vs_each_component_same_sample",
+  "positive_fold_ratio",
+]
+
+[diagnostics]
+metrics = [
+  "observations",
+  "cohorts",
+  "eligible_dates_by_market_state",
+  "feature_missingness",
+  "matched_control_coverage",
+  "market_and_industry_excess",
+  "turnover",
+  "max_drawdown",
+  "p05",
+  "tail_loss_rate",
+  "industry_concentration",
+  "raw_qfq_overlap",
+  "legacy_signal_overlap_and_correlation",
+]
+
+[expert_gate]
+minimum_observations = 1000
+minimum_cohorts = 60
+minimum_matched_control_coverage = 0.95
+minimum_median_net_matched_excess = 0.0
+minimum_median_daily_spearman_ic = 0.01
+minimum_top_bottom_net_matched_spread = 0.0
+minimum_positive_fold_ratio = 0.75
+minimum_positive_ic_fold_ratio = 0.75
+maximum_drawdown = 0.25
+market_excess_must_be_positive = true
+industry_excess_must_be_positive = true
+
+[legacy_intersection_gate]
+minimum_observations = 300
+minimum_cohorts = 60
+minimum_matched_control_coverage = 0.95
+minimum_median_net_matched_excess = 0.0
+minimum_positive_fold_ratio = 0.75
+maximum_drawdown = 0.25
+must_beat_each_component_same_sample = true
+
+[complexity_budget]
+new_experts = 2
+fixed_legacy_intersections = 4
+feature_period_search_allowed = false
+market_state_threshold_search_allowed = false
+expert_weight_search_allowed = false
+interaction_search_allowed = false
+nonlinear_model_allowed = false
+selector_allowed = false
+stop_if_no_route_passes = true
+
+[next_stage]
+condition = "at_least_one_expert_or_legacy_intersection_passes_all_training_only_gates"
+allowed_action = "freeze_one_simple_selector_candidate_without_reading_2025"
+forbidden_action = "use_2025_or_2026_to_choose_features_states_weights_horizons_or_routes"
