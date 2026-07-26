@@ -569,6 +569,15 @@ def _market_state(
     return "other"
 
 
+def _breadth(eligible: dict[str, dict[str, Any]]) -> float:
+    if not eligible:
+        return 0.0
+    return (
+        sum(bool(item["above_ma20"]) for item in eligible.values())
+        / len(eligible)
+    )
+
+
 def _schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -915,12 +924,7 @@ def _build_features(
                     "median_turnover20": features["median_turnover20"],
                     "above_ma20": features["above_ma20"],
                 }
-            breadth[day] = (
-                sum(bool(item["above_ma20"]) for item in eligible)
-                / len(eligible)
-                if eligible
-                else 0.0
-            )
+            breadth[day] = _breadth(eligible)
             market_state = (
                 fixed_states.get(day, "other")
                 if fixed_states is not None

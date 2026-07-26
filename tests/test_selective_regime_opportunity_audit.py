@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from aplan.selective_regime_opportunity_audit import (
     Outcome,
+    _breadth,
     _component_names,
     _expert_gate,
     _legacy_gate,
@@ -64,6 +65,15 @@ class SelectiveRegimeOpportunityAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "recovery")
+
+    def test_breadth_uses_feature_values_not_symbol_keys(self) -> None:
+        eligible = {
+            "000001": {"above_ma20": True},
+            "000002": {"above_ma20": False},
+            "000003": {"above_ma20": True},
+        }
+
+        self.assertAlmostEqual(_breadth(eligible), 2 / 3)
 
     def test_expert_gate_requires_every_frozen_kpi(self) -> None:
         metrics = {
