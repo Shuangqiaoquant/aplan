@@ -13,6 +13,7 @@ from aplan.qlib_reference import (
     Observation,
     QlibAlpha158LinearLiteReference,
     _next_holdings,
+    _pipeline_status,
     alpha158_selected20,
 )
 from aplan.strategy import SignalIntent, StrategyContext
@@ -20,6 +21,10 @@ from aplan.strategy_registry import StrategyRegistry
 
 
 class QlibReferenceTests(unittest.TestCase):
+    def test_pipeline_status_uses_streamed_latest_score_date(self) -> None:
+        self.assertEqual(_pipeline_status("20241008"), "completed_pipeline_pilot")
+        self.assertEqual(_pipeline_status(None), "data_unavailable")
+
     def test_selected_feature_vector_is_finite_and_named(self) -> None:
         bars = [
             Bar(

@@ -590,6 +590,10 @@ def _audit_qfq_input(
     }
 
 
+def _pipeline_status(latest_score_date: str | None) -> str:
+    return "completed_pipeline_pilot" if latest_score_date else "data_unavailable"
+
+
 def _write_score_snapshot(
     path: Path,
     rows: Sequence[tuple[Observation, float]],
@@ -732,7 +736,7 @@ def run_pilot(
     )
     result = {
         "strategy_id": STRATEGY_ID,
-        "status": "completed_pipeline_pilot" if used else "data_unavailable",
+        "status": _pipeline_status(latest_date),
         "classification": "external_reference_not_official_qlib_reproduction",
         "actual_input_price_kind": actual_price_kind,
         "performance_usable": performance_usable,
