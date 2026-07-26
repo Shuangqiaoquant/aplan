@@ -1,0 +1,41 @@
+[identity]
+strategy_id = "qlib_alpha158_linear_lite_reference_v0_1"
+status = "research"
+purpose = "外部开源基准与端到端流程冒烟测试，不构成买卖建议"
+
+[provenance]
+repository = "https://github.com/microsoft/qlib"
+license = "MIT"
+source_commit = "79633dd9506ea689e5400dea0197717b5b3d74b7"
+feature_source = "examples/benchmarks/TFT/tft.py"
+feature_definition_source = "qlib/contrib/data/loader.py"
+model_source = "examples/benchmarks_dynamic/baseline/workflow_config_linear_Alpha158.yaml"
+
+[data]
+price_kind = "qfq"
+train_start = "20230103"
+train_end = "20231229"
+validation_start = "20240102"
+validation_end = "20241008"
+training_sample_rate = 1.0
+open_2025 = false
+open_2026_holdout = false
+
+[model]
+estimator = "ridge"
+alpha = 0.05
+clip_zscore = 3.0
+label = "cross_section_rank_of_close_t_plus_2_over_close_t_plus_1"
+
+[portfolio]
+topk = 50
+n_drop = 5
+open_cost = 0.0005
+close_cost = 0.0015
+min_names_per_day = 100
+
+[stopping]
+minimum_validation_days = 60
+minimum_mean_rank_ic = 0.015
+minimum_positive_month_ratio = 0.60
+require_positive_net_excess = true
