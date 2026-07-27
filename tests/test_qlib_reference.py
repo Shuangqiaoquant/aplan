@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import tempfile
 import unittest
 from collections import deque
@@ -15,6 +16,7 @@ from aplan.qlib_reference import (
     _next_holdings,
     _pipeline_status,
     alpha158_selected20,
+    run_current_inference,
 )
 from aplan.strategy import SignalIntent, StrategyContext
 from aplan.strategy_registry import StrategyRegistry
@@ -85,6 +87,94 @@ class QlibReferenceTests(unittest.TestCase):
             n_drop=1,
         )
         self.assertEqual(result, {"000001", "000002", "000003"})
+
+    def test_current_inference_reads_no_future_labels_or_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_root = root / "yinhe_daily_qfq"
+            data_root.mkdir()
+            dates = [f"2024{index:04d}" for index in range(101, 163)]
+            fields = (
+                "symbol",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "turnover",
+                "is_suspended",
+                "is_limit_up",
+                "is_limit_down",
+            )
+            for offset, day in enumerate(dates):
+                with (data_root / f"{day}.csv").open(
+                    "w", newline="", encoding="utf-8"
+                ) as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields)
+                    writer.writeheader()
+                    for symbol_index, symbol in enumerate(("600000", "000001")):
+                        close = 10 + offset * 0.01 + symbol_index * 0.1
+                        writer.writerow(
+                            {
+                                "symbol": symbol,
+                                "open": close,
+                                "high": close + 0.1,
+                                "low": close - 0.1,
+                                "close": close,
+                                "volume": 1_000_000 + offset,
+                                "turnover": 10_000_000,
+                                "is_suspended": 0,
+                                "is_limit_up": 0,
+                                "is_limit_down": 0,
+                            }
+                        )
+            future = data_root / "20250102.csv"
+            future.write_text("future_return,outcome\n9,9\n", encoding="utf-8")
+            model_path = root / "model.json"
+            model_path.write_text(
+                json.dumps(
+                    {
+                        "model": {
+                            "medians": [0.0] * 20,
+                            "scales": [1.0] * 20,
+                            "coefficients": [0.0] + [1.0] * 20,
+                            "clip_zscore": 3.0,
+                            "training_rows": 100,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            preview = root / "preview.json"
+            result = run_current_inference(
+                data_root=data_root,
+                model_path=model_path,
+                conclusion_as_of="20240725",
+                price_as_of=dates[-2],
+                preview_path=preview,
+                full_scores_path=root / "scores.csv",
+            )
+            document = json.loads(preview.read_text(encoding="utf-8"))
+
+            self.assertEqual(result["status"], "current_shadow_inference")
+            self.assertEqual(document["as_of"], "20240725")
+            self.assertEqual(document["price_as_of"], dates[-2])
+            self.assertEqual(document["evidence_as_of"], "20240725")
+            self.assertEqual(document["coverage"]["history_last_date"], dates[-2])
+            self.assertEqual(document["evidence_review"]["status"], "evidence_gap")
+            self.assertEqual(document["evidence_review"]["score_impact"], "none")
+            self.assertIn("items", document)
+            self.assertNotIn("candidates", document)
+            self.assertIsInstance(document["items"][0]["invalidation"], list)
+            self.assertIn("summary", document["items"][0]["evidence"][0])
+            self.assertGreaterEqual(document["items"][0]["score_percentile"], 0)
+            self.assertLessEqual(document["items"][0]["score_percentile"], 100)
+            self.assertTrue(document["holdout_boundary_opened"])
+            serialized = json.dumps(document)
+            self.assertNotIn("future_return", serialized)
+            self.assertNotIn("outcome", serialized)
+            self.assertFalse(document["execution_eligible"])
+            self.assertEqual(document["formal_gate"], "reject")
 
     def test_research_adapter_emits_watch_only_non_actionable_signals(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

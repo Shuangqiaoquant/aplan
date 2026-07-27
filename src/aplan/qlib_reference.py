@@ -9,7 +9,7 @@ import math
 import tomllib
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Iterable, Sequence
@@ -411,6 +411,24 @@ def _scores(
     return grouped
 
 
+def _score_features(
+    model: dict[str, object],
+    features: Sequence[float],
+) -> float:
+    medians = [float(value) for value in model["medians"]]
+    scales = [float(value) for value in model["scales"]]
+    coefficients = [float(value) for value in model["coefficients"]]
+    clip = float(model["clip_zscore"])
+    normalized = [
+        max(-clip, min(clip, _safe_div(value - median, scale)))
+        for value, median, scale in zip(features, medians, scales, strict=True)
+    ]
+    return coefficients[0] + sum(
+        coefficient * value
+        for coefficient, value in zip(coefficients[1:], normalized, strict=True)
+    )
+
+
 def _rank_ic(rows: Sequence[tuple[Observation, float]]) -> float:
     if len(rows) < 2:
         return 0.0
@@ -592,6 +610,186 @@ def _audit_qfq_input(
 
 def _pipeline_status(latest_score_date: str | None) -> str:
     return "completed_pipeline_pilot" if latest_score_date else "data_unavailable"
+
+
+def _contains_forbidden_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            str(key).lower() in {"future_return", "outcome"}
+            or _contains_forbidden_key(nested)
+            for key, nested in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_forbidden_key(item) for item in value)
+    return False
+
+
+def run_current_inference(
+    *,
+    data_root: Path,
+    model_path: Path,
+    conclusion_as_of: str,
+    price_as_of: str,
+    preview_path: Path,
+    full_scores_path: Path,
+    top_n: int = 50,
+) -> dict[str, object]:
+    conclusion_as_of = "".join(
+        character for character in conclusion_as_of if character.isdigit()
+    )[:8]
+    price_as_of = "".join(
+        character for character in price_as_of if character.isdigit()
+    )[:8]
+    if len(conclusion_as_of) != 8 or len(price_as_of) != 8:
+        raise ValueError("inference as_of 与 price_as_of 必须为 YYYYMMDD")
+    if price_as_of > conclusion_as_of:
+        raise ValueError("price_as_of 不得晚于结论日")
+    dates = [day for day in available_dates(data_root) if day <= price_as_of]
+    if not dates or dates[-1] != price_as_of:
+        raise ValueError(f"qfq 不包含价格日 {price_as_of}")
+    history_dates = dates[-61:]
+    if len(history_dates) < 61:
+        raise ValueError("当前影子推理至少需要 61 个交易日")
+    if any(day > price_as_of for day in history_dates):
+        raise ValueError("当前影子推理不得读取信号日之后的数据")
+
+    model_document = json.loads(model_path.read_text(encoding="utf-8"))
+    model = model_document.get("model")
+    if not isinstance(model, dict):
+        raise ValueError("冻结 model.json 缺少 model 参数")
+    if int(model.get("training_rows") or 0) <= 0:
+        raise ValueError("冻结 model.json 没有有效训练记录")
+
+    histories: dict[str, deque[Bar]] = defaultdict(lambda: deque(maxlen=61))
+    file_rows = 0
+    for day in history_dates:
+        bars = load_bars(data_root / f"{day}.csv")
+        file_rows += len(bars)
+        for symbol, bar in bars.items():
+            histories[symbol].append(bar)
+    latest = load_bars(data_root / f"{price_as_of}.csv")
+    excluded: dict[str, int] = defaultdict(int)
+    scored: list[dict[str, object]] = []
+    for symbol, bar in latest.items():
+        if bar.suspended:
+            excluded["suspended"] += 1
+            continue
+        if bar.limit_up:
+            excluded["limit_up"] += 1
+            continue
+        if bar.turnover <= 0:
+            excluded["nonpositive_turnover"] += 1
+            continue
+        features = alpha158_selected20(histories.get(symbol, ()))
+        if features is None:
+            excluded["insufficient_or_invalid_features"] += 1
+            continue
+        scored.append(
+            {
+                "symbol": symbol,
+                "model_score": _score_features(model, features),
+            }
+        )
+    scored.sort(key=lambda row: float(row["model_score"]), reverse=True)
+    denominator = max(len(scored) - 1, 1)
+    for rank, row in enumerate(scored, 1):
+        row["rank"] = rank
+        row["score_percentile"] = round(100 * (1 - (rank - 1) / denominator), 6)
+
+    full_scores_path.parent.mkdir(parents=True, exist_ok=True)
+    with full_scores_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=("symbol", "rank", "model_score", "score_percentile"),
+        )
+        writer.writeheader()
+        writer.writerows(scored)
+
+    evidence = [
+        {
+            "kind": "frozen_external_model_score",
+            "summary": "冻结2023训练模型的当前横截面排序",
+            "source": "cloud_qfq_frozen_pilot",
+            "observed_at": price_as_of,
+        }
+    ]
+    risks = [
+        "正式研究门控结论为reject",
+        "当前结果是影子推理，不代表模型已验证通过",
+        "Qlib轻量派生实现不是官方benchmark原样复现",
+    ]
+    invalidation = ["数据哈希变化", "冻结模型哈希变化", "输入未通过验收"]
+    items = [
+        {
+            **row,
+            "evidence": evidence,
+            "risks": risks,
+            "invalidation": invalidation,
+        }
+        for row in scored[:top_n]
+    ]
+    data_audit = _hash_inputs(data_root, history_dates[0], price_as_of)
+    preview: dict[str, object] = {
+        "model_id": STRATEGY_ID,
+        "as_of": conclusion_as_of,
+        "price_as_of": price_as_of,
+        "evidence_as_of": conclusion_as_of,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": "cloud_qfq_frozen_pilot",
+        "data_hash": data_audit["aggregate_sha256"],
+        "model_hash": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+        "provisional": True,
+        "formal_gate": "reject",
+        "execution_eligible": False,
+        "holdout_boundary_opened": True,
+        "conclusion_status": "current_shadow_inference",
+        "evidence_review": {
+            "status": "evidence_gap",
+            "score_impact": "none",
+            "details": (
+                "未加载截至结论日严格PIT可用的证券状态或公告风险；"
+                "未跨时点填补，模型分数仅使用价格日及以前的冻结量价特征"
+            ),
+        },
+        "coverage": {
+            "latest_observed_symbols": len(latest),
+            "scored_symbols": len(scored),
+            "excluded_symbols": len(latest) - len(scored),
+            "coverage_rate": (
+                round(len(scored) / len(latest), 8) if latest else None
+            ),
+            "excluded_by_reason": dict(sorted(excluded.items())),
+            "history_first_date": history_dates[0],
+            "history_last_date": history_dates[-1],
+            "history_files": len(history_dates),
+            "history_rows_read": file_rows,
+        },
+        "items": items,
+    }
+    if _contains_forbidden_key(preview):
+        raise ValueError("当前影子推理预览包含禁止的未来结果字段")
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_text(
+        json.dumps(preview, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "status": "current_shadow_inference",
+        "as_of": conclusion_as_of,
+        "price_as_of": price_as_of,
+        "latest_observed_symbols": len(latest),
+        "scored_symbols": len(scored),
+        "excluded_symbols": len(latest) - len(scored),
+        "top_n": len(items),
+        "data_hash": preview["data_hash"],
+        "model_hash": preview["model_hash"],
+        "preview_hash": hashlib.sha256(preview_path.read_bytes()).hexdigest(),
+        "preview_path": str(preview_path),
+        "full_scores_path": str(full_scores_path),
+        "formal_gate": "reject",
+        "execution_eligible": False,
+        "holdout_boundary_opened": True,
+    }
 
 
 def _write_score_snapshot(
@@ -902,19 +1100,57 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="仅供 performance_usable=false 的工程冒烟抽样",
     )
+    parser.add_argument("--inference-as-of", help="运行冻结模型无标签当前影子推理")
+    parser.add_argument(
+        "--price-as-of",
+        help="模型价格与特征截止日；非交易日结论必须显式指定最近完整交易日",
+    )
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=Path("reports/qlib_alpha158_linear_lite_reference/model.json"),
+    )
+    parser.add_argument("--preview-output", type=Path)
+    parser.add_argument("--full-scores-output", type=Path)
     return parser
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    result = run_pilot(
-        project_root=args.project_root.resolve(),
-        data_root=args.data_root.resolve(),
-        config_path=args.config.resolve(),
-        output_root=args.output.resolve(),
-        input_price_kind=args.input_price_kind,
-        engineering_sample_rate=args.engineering_sample_rate,
-    )
+    if args.inference_as_of:
+        conclusion_as_of = "".join(
+            character for character in args.inference_as_of if character.isdigit()
+        )[:8]
+        price_as_of = "".join(
+            character
+            for character in (args.price_as_of or args.inference_as_of)
+            if character.isdigit()
+        )[:8]
+        preview = args.preview_output or (
+            Path("data/research/model_previews")
+            / STRATEGY_ID
+            / f"{conclusion_as_of}.json"
+        )
+        full_scores = args.full_scores_output or (
+            args.output / "current_shadow_scores" / f"{price_as_of}.csv"
+        )
+        result = run_current_inference(
+            data_root=args.data_root.resolve(),
+            model_path=args.model.resolve(),
+            conclusion_as_of=conclusion_as_of,
+            price_as_of=price_as_of,
+            preview_path=preview.resolve(),
+            full_scores_path=full_scores.resolve(),
+        )
+    else:
+        result = run_pilot(
+            project_root=args.project_root.resolve(),
+            data_root=args.data_root.resolve(),
+            config_path=args.config.resolve(),
+            output_root=args.output.resolve(),
+            input_price_kind=args.input_price_kind,
+            engineering_sample_rate=args.engineering_sample_rate,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
