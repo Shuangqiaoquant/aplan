@@ -13,6 +13,30 @@ cd "$ROOT"
 mkdir -p logs reports/yinhe_history_extension
 source .venv/bin/activate
 
+python - "$ROOT" "$START_DATE" "$END_DATE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root, start, end = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+path = root / "data/processed/security_history/manifest.json"
+manifest = json.loads(path.read_text(encoding="utf-8"))
+ready = (
+    manifest.get("status") == "validated"
+    and manifest.get("point_in_time") is True
+    and str(manifest.get("coverage_start") or "") <= start
+    and str(manifest.get("coverage_end") or "") >= end
+)
+if not ready:
+    raise SystemExit(f"historical security state is not ready: {path}")
+print(
+    "historical security state ready:",
+    manifest["coverage_start"],
+    manifest["coverage_end"],
+    manifest["security_count"],
+)
+PY
+
 echo "[$(date --iso-8601=seconds)] build historical PIT symbol pool"
 python -m aplan.yinhe_history_extension build-pool \
   --root "$ROOT" \
